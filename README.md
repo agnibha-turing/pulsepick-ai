@@ -6,7 +6,7 @@ PulsePick AI is an intelligent content curation platform designed for sales prof
 
 PulsePick AI uses advanced filtering and recommendation algorithms to deliver relevant content across various industries including BFSI, Retail, Tech, and Healthcare. The platform offers different content types such as articles, social posts, newsletters, and reports, with customizable relevance settings.
 
-![PulsePick AI Screenshot](frontend/public/screenshot.png)
+<!-- ![PulsePick AI Screenshot](frontend/public/screenshot.png) -->
 
 ## Features
 
