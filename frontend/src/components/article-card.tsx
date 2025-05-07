@@ -129,8 +129,8 @@ export function ArticleCard({ article }: ArticleCardProps) {
 
   return (
     <>
-      <Card className="overflow-hidden transition-all hover:shadow-md dark:hover:border-primary/30">
-        <CardHeader className="pb-3">
+      <Card className="overflow-hidden transition-all hover:shadow-md dark:hover:border-primary/30 flex flex-col h-[340px] w-full">
+        <CardHeader className="pb-3 flex-grow">
           <div className="flex justify-between items-start gap-2 mb-1">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-sm bg-primary/20 flex items-center justify-center text-[8px]">
@@ -177,7 +177,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
           </div>
         </CardHeader>
         
-        <CardFooter className="pt-1 pb-4 flex justify-between items-center">
+        <CardFooter className="pt-1 pb-4 flex justify-between items-center mt-auto">
           <div className="flex gap-2">
             <Button 
               variant={saved ? "default" : "outline"} 
