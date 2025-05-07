@@ -1,4 +1,3 @@
-
 export interface Article {
   id: string;
   title: string;
@@ -122,6 +121,118 @@ const mockArticles: Article[] = [
     date: "2025-05-01",
     source: "Future Store Magazine",
     url: "https://example.com/article8"
+  },
+  {
+    id: "9",
+    title: "AI-Driven Diagnostics Reducing Hospital Wait Times by 47%",
+    summary: [
+      "Machine learning algorithms identifying critical cases 8 minutes faster on average",
+      "Remote monitoring technology decreasing readmission rates by 36%",
+      "Predictive analytics helping optimize staff scheduling during peak hours"
+    ],
+    trendingScore: 91,
+    categories: ["Healthcare"],
+    date: "2025-05-02",
+    source: "Medical Innovation Today",
+    url: "https://example.com/article9"
+  },
+  {
+    id: "10",
+    title: "Telehealth Adoption Soars Among Senior Patients",
+    summary: [
+      "65+ demographic showing 78% increase in telehealth appointment bookings",
+      "Virtual care satisfaction rates reaching 87% among geriatric patients",
+      "Insurance companies expanding remote visit coverage by 41%"
+    ],
+    trendingScore: 84,
+    categories: ["Healthcare"],
+    date: "2025-05-04",
+    source: "Digital Health Weekly",
+    url: "https://example.com/article10"
+  },
+  {
+    id: "11",
+    title: "Electronic Health Records: The Next Generation",
+    summary: [
+      "Blockchain-secured patient records reducing data breaches by 89%",
+      "Interoperability improvements allowing 65% faster specialist consultations",
+      "Voice-activated documentation saving clinicians 1.2 hours per day"
+    ],
+    trendingScore: 76,
+    categories: ["Healthcare", "Tech"],
+    date: "2025-05-01",
+    source: "Healthcare Technology Review",
+    url: "https://example.com/article11"
+  },
+  {
+    id: "12",
+    title: "Quantum Computing Breakthrough for Drug Discovery",
+    summary: [
+      "New quantum algorithms reducing molecular simulation time from years to days",
+      "Pharmaceutical R&D costs projected to decrease by 32% with new technology",
+      "First quantum-discovered drug candidate entering clinical trials next quarter"
+    ],
+    trendingScore: 95,
+    categories: ["Healthcare", "Tech"],
+    date: "2025-05-03",
+    source: "Quantum Science Today",
+    url: "https://example.com/article12"
+  },
+  {
+    id: "13",
+    title: "Tech Giants Competing for AI Chip Dominance",
+    summary: [
+      "New neural processing units showing 4.3x performance gains over previous generation",
+      "Edge AI capabilities enabling 78% reduction in cloud computing dependencies",
+      "Specialized ML hardware market projected to reach $67B by 2026"
+    ],
+    trendingScore: 93,
+    categories: ["Tech"],
+    date: "2025-05-02",
+    source: "Silicon Trends",
+    url: "https://example.com/article13"
+  },
+  {
+    id: "14",
+    title: "Open Source LLMs Transforming Enterprise Software Development",
+    summary: [
+      "Code generation tools increasing developer productivity by 41%",
+      "Self-documenting systems reducing onboarding time for new team members",
+      "Security vulnerability detection improving by 63% with AI code review"
+    ],
+    trendingScore: 87,
+    categories: ["Tech"],
+    date: "2025-05-04",
+    source: "Developer Insights",
+    url: "https://example.com/article14"
+  },
+  {
+    id: "15",
+    title: "Sustainable Data Centers: The Green Computing Revolution",
+    summary: [
+      "Liquid cooling technologies reducing energy consumption by 52%",
+      "Carbon-neutral server farms becoming standard for 73% of Fortune 500 companies",
+      "AI-optimized workload scheduling cutting peak power demands by 38%"
+    ],
+    trendingScore: 82,
+    categories: ["Tech"],
+    date: "2025-05-01",
+    source: "Green Tech Review",
+    url: "https://example.com/article15"
+  },
+  {
+    id: "16",
+    title: "Zero-Trust Architecture: The New Security Standard",
+    summary: [
+      "Organizations adopting zero-trust frameworks reporting 76% fewer breaches",
+      "Continuous authentication methods replacing traditional password systems",
+      "Identity-based security perimeters replacing network-based approaches"
+    ],
+    trendingScore: 89,
+    categories: ["Tech"],
+    date: "2025-05-03",
+    source: "Cybersecurity Intelligence",
+    url: "https://example.com/article16"
   }
 ];
 
