@@ -12,7 +12,26 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { Share, Filter, BookmarkPlus } from "lucide-react";
+import { 
+  Share, 
+  Filter, 
+  BookmarkPlus, 
+  Bell, 
+  Search, 
+  Menu,
+  Home,
+  User,
+  Settings
+} from "lucide-react";
+import {
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+  navigationMenuTriggerStyle,
+} from "@/components/ui/navigation-menu";
 
 const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Tech", "Healthcare"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
@@ -59,19 +78,90 @@ const Index = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur-sm">
+      {/* Enhanced Header/Navbar */}
+      <header className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur-md shadow-sm">
         <div className="container flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center text-primary-foreground font-bold">P</div>
-            <span className="font-bold text-xl hidden sm:inline-block">Pulse<span className="text-primary">Pick</span></span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-black dark:bg-white rounded flex items-center justify-center text-white dark:text-black font-bold">
+                P
+              </div>
+              <span className="font-bold text-xl hidden sm:inline-block">Pulse<span className="text-black dark:text-white">Pick</span></span>
+            </div>
+            
+            <div className="hidden md:flex">
+              <NavigationMenu>
+                <NavigationMenuList>
+                  <NavigationMenuItem>
+                    <NavigationMenuTrigger className="bg-transparent">Discover</NavigationMenuTrigger>
+                    <NavigationMenuContent>
+                      <ul className="grid gap-3 p-4 w-[400px] md:w-[500px] lg:w-[600px] grid-cols-2">
+                        {["All Content", "Trending Now", "Recent Publications", "My Industry"].map((item) => (
+                          <li key={item} className="row-span-1">
+                            <NavigationMenuLink asChild>
+                              <a
+                                className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+                                href="#"
+                              >
+                                <div className="text-sm font-medium leading-none">{item}</div>
+                              </a>
+                            </NavigationMenuLink>
+                          </li>
+                        ))}
+                      </ul>
+                    </NavigationMenuContent>
+                  </NavigationMenuItem>
+                  <NavigationMenuItem>
+                    <NavigationMenuTrigger className="bg-transparent">Analyze</NavigationMenuTrigger>
+                    <NavigationMenuContent>
+                      <ul className="grid gap-3 p-4 w-[400px] md:w-[500px] grid-cols-2">
+                        {["Market Trends", "Competitor Analysis", "Industry Reports", "Custom Insights"].map((item) => (
+                          <li key={item} className="row-span-1">
+                            <NavigationMenuLink asChild>
+                              <a
+                                className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+                                href="#"
+                              >
+                                <div className="text-sm font-medium leading-none">{item}</div>
+                              </a>
+                            </NavigationMenuLink>
+                          </li>
+                        ))}
+                      </ul>
+                    </NavigationMenuContent>
+                  </NavigationMenuItem>
+                </NavigationMenuList>
+              </NavigationMenu>
+            </div>
           </div>
+          
           <div className="flex items-center gap-3">
+            <div className="hidden sm:flex relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <input
+                type="search"
+                placeholder="Search content..."
+                className="h-9 w-[180px] lg:w-[280px] rounded-md border border-input bg-background px-3 py-1 pl-8 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+              />
+            </div>
+            
+            <Button size="icon" variant="ghost" className="relative hidden sm:flex">
+              <Bell className="h-5 w-5" />
+              <span className="absolute -right-0 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                3
+              </span>
+            </Button>
+            
             <ThemeToggle />
-            <Avatar className="h-8 w-8">
+            
+            <Avatar className="h-9 w-9 cursor-pointer border-2 border-transparent hover:border-primary/30 transition-all">
               <AvatarImage src="" alt="User" />
               <AvatarFallback className="bg-primary/10 text-primary">JS</AvatarFallback>
             </Avatar>
+            
+            <Button variant="outline" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
+              <Menu className="h-5 w-5" />
+            </Button>
           </div>
         </div>
       </header>
@@ -131,9 +221,21 @@ const Index = () => {
         
         {/* Main feed */}
         <main className="flex-1 p-4 sm:p-6">
-          <h1 className="text-2xl font-bold mb-4">
-            {activeIndustry === "All" ? "All Industries" : activeIndustry} Content
-          </h1>
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-bold">
+              {activeIndustry === "All" ? "All Industries" : activeIndustry} Content
+            </h1>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
+                <Search className="h-4 w-4" />
+                <span>Filter</span>
+              </Button>
+              <Button variant="outline" size="sm" className="gap-2">
+                <BookmarkPlus className="h-4 w-4" />
+                <span className="hidden sm:inline">Saved</span>
+              </Button>
+            </div>
+          </div>
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(6)].map((_, i) => (
@@ -181,9 +283,13 @@ const Index = () => {
 
       {/* Footer */}
       <footer className="border-t py-6">
-        <div className="container px-4 text-center text-sm text-muted-foreground">
-          <p>© 2025 PulsePick. AI-powered content curation for sales professionals.</p>
-          <p className="text-xs mt-1">Activity will be archived for compliance.</p>
+        <div className="container px-4 flex flex-col sm:flex-row justify-between items-center">
+          <p className="text-sm text-muted-foreground">© 2025 PulsePick. AI-powered content curation for sales professionals.</p>
+          <div className="flex gap-4 mt-3 sm:mt-0">
+            <Button variant="ghost" size="sm">Privacy</Button>
+            <Button variant="ghost" size="sm">Terms</Button>
+            <Button variant="ghost" size="sm">Support</Button>
+          </div>
         </div>
       </footer>
     </div>
@@ -249,7 +355,8 @@ const Index = () => {
         </div>
         
         <div>
-          <Button variant="ghost" className="w-full justify-start gap-2" size="sm">
+          <h3 className="font-medium mb-3">Saved Items</h3>
+          <Button variant="outline" className="w-full justify-start gap-2" size="sm">
             <BookmarkPlus size={16} />
             Saved for Later
           </Button>
