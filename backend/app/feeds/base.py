@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -55,5 +55,6 @@ class BaseConnector(ABC):
 
     def fetch_since(self, days: int = 1, limit: int = 100) -> List[Dict[str, Any]]:
         """Helper method to fetch articles published in the last N days"""
-        since = datetime.utcnow() - timedelta(days=days)
+        # Create timezone-aware UTC datetime to avoid comparison issues with timezone-aware dates
+        since = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(days=days)
         return self.fetch_articles(since=since, limit=limit)

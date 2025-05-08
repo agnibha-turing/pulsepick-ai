@@ -2,7 +2,8 @@ services:
   db:
     image: pgvector/pgvector:pg17
     volumes:
-      - postgres_data:/var/lib/postgres/data/
+      - postgres_data:/var/lib/postgresql/data/
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       - POSTGRES_USER=pulsepick
       - POSTGRES_PASSWORD=pulsepick
