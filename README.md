@@ -1,79 +1,142 @@
 # PulsePick AI
 
-PulsePick AI is an intelligent content curation platform designed for sales professionals, providing personalized, industry-specific content recommendations to help stay informed about market trends and opportunities.
-
-## Project Overview
-
-PulsePick AI uses advanced filtering and recommendation algorithms to deliver relevant content across various industries including BFSI, Retail, Tech, and Healthcare. The platform offers different content types such as articles, social posts, newsletters, and reports, with customizable relevance settings.
-
-<!-- ![PulsePick AI Screenshot](frontend/public/screenshot.png) -->
+PulsePick AI is a tool for sales and marketing professionals to discover and share relevant AI-related content with their clients and prospects.
 
 ## Features
 
-- **Industry-Specific Content**: Filter content by industry sectors (BFSI, Retail, Tech, Healthcare)
-- **Multiple Content Types**: Access articles, social posts, newsletters, and reports
-- **Customizable Time Periods**: View content from today, last 7 days, last 30 days, or custom ranges
-- **Relevance Controls**: Adjust minimum relevance thresholds for content recommendations
-- **Responsive Design**: Fully responsive UI that works on desktop and mobile devices
-- **Dark/Light Mode**: Toggle between dark and light themes
+- 🔍 Automatic content discovery from Google News and NewsAPI
+- 🧠 AI-powered summarization and industry classification (BFSI, Retail, Healthcare, etc.)
+- 🔎 Semantic search using vector embeddings (find content similar to your query)
+- 📊 Relevance scoring based on recency and topic matching
+- 🔄 Scheduled content ingestion with customizable intervals
 
-## Project Structure
+## Tech Stack
 
-The project is organized into two main directories:
-
-- `frontend/`: React-based web application built with Vite, TypeScript, and shadcn/ui
-- `backend/`: (In development) Will contain the API services for content retrieval and user management
-
-## Technology Stack
-
-### Frontend
-- **Framework**: React with TypeScript
-- **Build Tool**: Vite
-- **UI Components**: shadcn/ui (built on Radix UI)
-- **Styling**: Tailwind CSS
-- **State Management**: React Query
-- **Routing**: React Router
+- **Backend**: FastAPI, SQLAlchemy, Postgres+pgvector, Celery, OpenAI
+- **Data Sources**: Google News RSS, NewsAPI.org, LinkedIn (coming soon)
+- **Infrastructure**: Docker, Redis
 
 ## Getting Started
 
 ### Prerequisites
-- Node.js (v18 or later)
-- npm or bun
 
-### Installation
+- Docker and Docker Compose
+- OpenAI API key
+- NewsAPI key (free tier works for development)
+
+### Setup
+
+1. Clone the repository
+
+   ```
+   git clone <repository-url>
+   cd pulsepick-ai
+   ```
+
+2. Create environment files
+
+   ```
+   cp backend/.env.example backend/.env
+   ```
+
+3. Edit the `.env` file with your API keys
+
+   ```
+   OPENAI_API_KEY=your_openai_api_key_here
+   NEWSAPI_KEY=your_newsapi_key_here
+   ```
+
+4. Start the services
+
+   ```
+   docker-compose up -d
+   ```
+
+5. Initialize the database
+
+   ```
+   docker-compose exec backend alembic upgrade head
+   ```
+
+6. The API is now available at http://localhost:8000
+   - API docs: http://localhost:8000/docs
+
+### Manually Trigger Content Fetching
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-
-# Navigate to the frontend directory
-cd pulsepick-ai/frontend
-
-# Install dependencies
-npm install
-# or
-bun install
-
-# Start the development server
-npm run dev
-# or
-bun run dev
+curl -X POST http://localhost:8000/api/v1/articles/fetch
 ```
 
-The application will be available at `http://localhost:5173`.
+## API Usage
 
-## Development Roadmap
+### Get Recent Articles
 
-- **Backend Implementation**: Develop a robust API for content retrieval and user management
-- **Authentication**: Add user authentication and profile management
-- **Saved Content**: Implement functionality to save and organize favorite content
-- **AI Recommendations**: Enhance content recommendations with machine learning algorithms
-- **Content Analytics**: Add analytics to track reading patterns and interests
+```bash
+# Get latest articles
+curl http://localhost:8000/api/v1/articles/
 
-## Contributing
+# Filter by industry
+curl http://localhost:8000/api/v1/articles/?industry=bfsi
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+# Paginate results
+curl http://localhost:8000/api/v1/articles/?limit=10&offset=20
+
+# Sort by relevance
+curl http://localhost:8000/api/v1/articles/?sort_by=relevance_score
+```
+
+### Search Articles
+
+```bash
+# Semantic search
+curl http://localhost:8000/api/v1/articles/search?q=generative%20ai%20fintech
+
+# Combine search with industry filter
+curl http://localhost:8000/api/v1/articles/search?q=generative%20ai%20fintech&industry=bfsi
+```
+
+## Architecture
+
+```
+                 ┌─────────────┐      scheduled      ┌────────────────┐
+                 │  Celery /   │ ───────────────────>│ Feed Connectors │
+                 │  Celery Beat│                     └────────────────┘
+                 └─────────────┘                            │
+                       ^                                     │ raw articles
+                       │                                     ▼
+                worker queue                        ┌─────────────────────┐
+              (Redis / RabbitMQ)                    │ Processing Pipeline │
+                                                    ├─────────────────────┤
+                                                    │ 1. Deduplicate      │
+                                                    │ 2. Summarise (LLM)  │
+                                                    │ 3. Classify (BFSI…) │
+                                                    │ 4. Vector Embedding │
+                                                    └─────────┬───────────┘
+                                                              │
+                Postgres + pgvector                           │
+        ┌───────────────────────────────────────────────────┐▼────────────────────┐
+        │  articles(id, title, url, summary, embeddings, industry)                │
+        │  sources(id, name, type)                                                │
+        └──────────────────────────────────┬────────────────────────────────────────┘
+                                           │
+                                           ▼
+                                  ┌─────────────────┐
+                                  │  REST / GraphQL │
+                                  │  FastAPI svc    │
+                                  └─────────────────┘
+                                           │
+                                           ▼
+                                  React / Next.js UI
+```
+
+## Future Development
+
+- ⬆️ LinkedIn integration
+- 📣 Twitter/X integration
+- 📱 Mobile-friendly web app
+- 📤 Email digests
+- 🔗 Slack/Teams integration
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT

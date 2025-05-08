@@ -1,0 +1,75 @@
+import feedparser
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+import urllib.parse
+from time import mktime
+from sqlalchemy.orm import Session
+
+from app.feeds.base import BaseConnector
+from app.db.models import SourceType
+
+
+class GoogleNewsConnector(BaseConnector):
+    """Connector for Google News RSS feeds"""
+
+    BASE_URL = "https://news.google.com/rss/search"
+
+    def __init__(self, db: Session, topics: List[str] = None):
+        super().__init__(db, SourceType.GOOGLE_NEWS)
+        self.topics = topics or [
+            "artificial intelligence", "generative ai", "ai technology"]
+
+    def _build_url(self, query: str) -> str:
+        """Build Google News RSS URL for the given query"""
+        encoded_query = urllib.parse.quote(query)
+        return f"{self.BASE_URL}?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+
+    def _parse_datetime(self, date_str: str) -> Optional[datetime]:
+        """Parse the datetime from RSS feed entry"""
+        try:
+            return datetime.fromtimestamp(mktime(feedparser.parsedate(date_str)))
+        except:
+            return None
+
+    def fetch_articles(self, since: Optional[datetime] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Fetch articles from Google News based on configured topics"""
+        results = []
+
+        for topic in self.topics:
+            # Create or get source for this topic
+            source = self.get_or_create_source(
+                name=f"Google News - {topic}",
+                url=self._build_url(topic),
+                description=f"Google News feed for topic: {topic}"
+            )
+
+            # Fetch the RSS feed
+            feed_url = self._build_url(topic)
+            feed = feedparser.parse(feed_url)
+
+            # Process entries
+            for entry in feed.entries[:limit]:
+                published_at = self._parse_datetime(entry.get('published'))
+
+                # Skip if older than 'since' parameter
+                if since and published_at and published_at < since:
+                    continue
+
+                # Extract data
+                article = {
+                    'source_id': source.id,
+                    'title': entry.get('title', ''),
+                    'url': entry.get('link', ''),
+                    'author': entry.get('author', ''),
+                    'published_at': published_at,
+                    'content': entry.get('summary', ''),
+                    'raw_json': dict(entry)
+                }
+
+                results.append(article)
+
+                # Stop if we've reached the limit
+                if len(results) >= limit:
+                    break
+
+        return results[:limit]

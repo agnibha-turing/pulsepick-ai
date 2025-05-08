@@ -1,0 +1,102 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    volumes:
+      - postgres_data:/var/lib/postgres/data/
+    environment:
+      - POSTGRES_USER=pulsepick
+      - POSTGRES_PASSWORD=pulsepick
+      - POSTGRES_DB=pulsepick
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulsepick"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=pulsepick
+      - POSTGRES_PASSWORD=pulsepick
+      - POSTGRES_DB=pulsepick
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_COMPLETION_MODEL=${OPENAI_COMPLETION_MODEL}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
+      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+      - redis
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=pulsepick
+      - POSTGRES_PASSWORD=pulsepick
+      - POSTGRES_DB=pulsepick
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_COMPLETION_MODEL=${OPENAI_COMPLETION_MODEL}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
+      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app worker --loglevel=info
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+      - redis
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=pulsepick
+      - POSTGRES_PASSWORD=pulsepick
+      - POSTGRES_DB=pulsepick
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_COMPLETION_MODEL=${OPENAI_COMPLETION_MODEL}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
+      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data: 
