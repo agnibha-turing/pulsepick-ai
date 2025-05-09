@@ -1,17 +1,18 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ArticleCard } from "@/components/article-card";
 import { FilterChips } from "@/components/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getArticles, Article } from "@/services/article-service";
+import { getArticles, checkForNewArticles, getLastFetchTime, Article } from "@/services/article-service";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { UPDATE_CHECK_INTERVAL } from "@/lib/env";
+import { ApiDebugger } from "@/components/ApiDebugger";
 import { 
   Share, 
   Filter, 
@@ -21,7 +22,8 @@ import {
   Menu,
   Home,
   User,
-  Settings
+  Settings,
+  RefreshCw
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -32,6 +34,7 @@ import {
   NavigationMenuTrigger,
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
+import { toast } from "sonner";
 
 const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Tech", "Healthcare"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
@@ -46,27 +49,84 @@ const Index = () => {
   const [contentTypes, setContentTypes] = useState<string[]>(["Articles"]);
   const [timePeriod, setTimePeriod] = useState("7 Days");
   const [minRelevance, setMinRelevance] = useState([50]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  const [newContentAvailable, setNewContentAvailable] = useState(false);
+
+  const fetchArticles = useCallback(async () => {
+    setLoading(true);
+    setRefreshing(true);
+    setNewContentAvailable(false);
+    
+    try {
+      const filters = [...activeFilters];
+      if (activeIndustry !== "All") {
+        filters.push(activeIndustry);
+      }
+      
+      const articlesData = await getArticles(filters);
+      setArticles(articlesData);
+      setLastUpdateTime(new Date());
+    } catch (error) {
+      console.error("Error fetching articles:", error);
+      toast.error("Failed to refresh content");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [activeFilters, activeIndustry]);
 
   useEffect(() => {
-    const fetchArticles = async () => {
-      setLoading(true);
-      try {
-        let filters = [...activeFilters];
-        if (activeIndustry !== "All") {
-          filters.push(activeIndustry);
-        }
-        
-        const articlesData = await getArticles(filters);
-        setArticles(articlesData);
-      } catch (error) {
-        console.error("Error fetching articles:", error);
-      } finally {
-        setLoading(false);
+    fetchArticles();
+  }, [fetchArticles]);
+
+  useEffect(() => {
+    const checkUpdates = async () => {
+      const hasUpdates = await checkForNewArticles();
+      if (hasUpdates) {
+        setNewContentAvailable(true);
       }
     };
 
-    fetchArticles();
-  }, [activeFilters, activeIndustry]);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        checkUpdates();
+      }
+    }, UPDATE_CHECK_INTERVAL);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkUpdates();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  const formatLastUpdate = () => {
+    if (!lastUpdateTime) return 'Never';
+    
+    const now = new Date();
+    const isToday = lastUpdateTime.getDate() === now.getDate() && 
+                   lastUpdateTime.getMonth() === now.getMonth() &&
+                   lastUpdateTime.getFullYear() === now.getFullYear();
+    
+    if (isToday) {
+      return `Today at ${lastUpdateTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    
+    return lastUpdateTime.toLocaleString([], { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit', 
+      minute: '2-digit'
+    });
+  };
 
   const toggleContentType = (type: string) => {
     setContentTypes(prev => 
@@ -189,6 +249,25 @@ const Index = () => {
         </div>
       </div>
 
+      {/* New content notification */}
+      {newContentAvailable && (
+        <div className="sticky top-[112px] z-10 bg-primary/10 border-b border-primary/20">
+          <div className="container px-4 py-2 flex items-center justify-between">
+            <span className="text-sm">New content is available</span>
+            <Button 
+              size="sm" 
+              variant="ghost" 
+              className="gap-2" 
+              onClick={fetchArticles}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex flex-1 container px-0 sm:px-4">
         {/* Filter button for mobile */}
@@ -222,10 +301,25 @@ const Index = () => {
         {/* Main feed */}
         <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-bold">
-              {activeIndustry === "All" ? "All Industries" : activeIndustry} Content
-            </h1>
+            <div>
+              <h1 className="text-2xl font-bold">
+                {activeIndustry === "All" ? "All Industries" : activeIndustry} Content
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Last updated: {formatLastUpdate()}
+              </p>
+            </div>
             <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2"
+                onClick={fetchArticles}
+                disabled={refreshing}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
               <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
                 <Search className="h-4 w-4" />
                 <span>Filter</span>
@@ -292,6 +386,9 @@ const Index = () => {
           </div>
         </div>
       </footer>
+      
+      {/* API Debugger - only shown in development mode */}
+      {import.meta.env.DEV && <ApiDebugger />}
     </div>
   );
 

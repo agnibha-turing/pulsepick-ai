@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS article (
     image_url VARCHAR(2048),
     industry VARCHAR(50),
     relevance_score FLOAT DEFAULT 0.0,
+    keywords VARCHAR[] DEFAULT NULL,
     embedding VECTOR(3072),
     raw_json JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

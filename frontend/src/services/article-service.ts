@@ -1,3 +1,5 @@
+import { apiFetch, API_BASE_URL } from './api-config';
+
 export interface Article {
   id: string;
   title: string;
@@ -7,8 +9,37 @@ export interface Article {
   date: string;
   source: string;
   url: string;
+  keywords?: string[];
 }
 
+// Backend API response interface
+interface ApiArticle {
+  id: number;
+  title: string;
+  url: string;
+  summary: string;
+  relevance_score: number;
+  industry: string;
+  published_at: string | null;
+  author: string;
+  image_url: string;
+  keywords: string[] | null;
+  source: {
+    id: number;
+    name: string;
+    type: string;
+  };
+}
+
+interface ApiResponse {
+  articles: ApiArticle[];
+}
+
+interface UpdatesResponse {
+  hasUpdates: boolean;
+}
+
+// Keep mock data for fallback/testing
 const mockArticles: Article[] = [
   {
     id: "1",
@@ -236,15 +267,118 @@ const mockArticles: Article[] = [
   }
 ];
 
+// Transform backend data to frontend format
+const transformArticle = (apiArticle: ApiArticle): Article => {
+  // Split summary into bullet points if it contains them, otherwise create a single item array
+  const summaryPoints = apiArticle.summary.includes("•") 
+    ? apiArticle.summary.split("•").filter(s => s.trim().length > 0)
+    : [apiArticle.summary];
+  
+  return {
+    id: apiArticle.id.toString(),
+    title: apiArticle.title,
+    summary: summaryPoints,
+    trendingScore: apiArticle.relevance_score || 0,
+    categories: [apiArticle.industry], // Convert single industry to categories array
+    date: apiArticle.published_at || new Date().toISOString().split('T')[0],
+    source: apiArticle.source ? apiArticle.source.name : "Unknown Source",
+    url: apiArticle.url,
+    keywords: apiArticle.keywords
+  };
+};
+
+// Track last fetch time
+let lastFetchTime = 0;
+let cachedArticles: Article[] = [];
+
 export const getArticles = async (filters: string[] = []): Promise<Article[]> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  if (filters.length === 0) {
-    return mockArticles;
+  try {
+    console.log("Fetching articles from API with filters:", filters);
+    
+    // Build query params for filters
+    const queryParams = new URLSearchParams();
+    
+    if (filters.length > 0) {
+      // Only take the first filter as the backend only supports one industry filter
+      const industry = filters[0];
+      queryParams.append('industry', industry.toLowerCase());
+    }
+    
+    // Use the correct API endpoint path
+    const endpoint = `/api/v1/articles${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+    
+    console.log(`Trying endpoint: ${API_BASE_URL}${endpoint}`);
+    const response = await fetch(`${API_BASE_URL}${endpoint}`);
+    
+    if (!response.ok) {
+      console.log(`Endpoint ${endpoint} returned ${response.status}`);
+      throw new Error(`API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log("API response:", data);
+    
+    lastFetchTime = Date.now();
+    
+    // The backend returns an array of articles directly
+    const articles = data.map(transformArticle);
+    console.log("Transformed articles:", articles);
+    cachedArticles = articles;
+    
+    return articles;
+  } catch (error) {
+    console.error("Error fetching articles:", error);
+    
+    // Fallback to cached data if available, then mock data
+    if (cachedArticles.length > 0) {
+      console.log("Using cached articles");
+      return cachedArticles.filter(article => 
+        filters.length === 0 || article.categories.some(category => filters.includes(category))
+      );
+    }
+    
+    console.log("Using mock articles");
+    return mockArticles.filter(article => 
+      filters.length === 0 || article.categories.some(category => filters.includes(category))
+    );
   }
-  
-  return mockArticles.filter(article => 
-    article.categories.some(category => filters.includes(category))
-  );
+};
+
+// Check for new articles without changing current view
+export const checkForNewArticles = async (): Promise<boolean> => {
+  try {
+    if (lastFetchTime === 0) return false;
+    
+    // Try with the correct endpoint
+    const endpoint = `/api/v1/articles?since=${lastFetchTime}`;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`);
+      
+      if (!response.ok) {
+        console.log(`Update check endpoint ${endpoint} returned ${response.status}`);
+        return false;
+      }
+      
+      const data = await response.json();
+      // If there are any articles with a published_at date after our last fetch, 
+      // we consider that as having updates
+      return data.some((article: ApiArticle) => {
+        if (!article.published_at) return false;
+        const articleDate = new Date(article.published_at).getTime();
+        return articleDate > lastFetchTime;
+      });
+    } catch (e) {
+      console.error(`Error checking for updates with endpoint ${endpoint}:`, e);
+      return false;
+    }
+  } catch (error) {
+    console.error("Error checking for updates:", error);
+    return false;
+  }
+};
+
+// Get last fetch time
+export const getLastFetchTime = (): number => {
+  return lastFetchTime;
 };

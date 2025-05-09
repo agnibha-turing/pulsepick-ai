@@ -50,6 +50,7 @@ class Article(Base):
     # Classification
     industry = Column(String(50), nullable=True)
     relevance_score = Column(Float, nullable=True, default=0.0)
+    keywords = Column(ARRAY(String), nullable=True)
 
     # Vector embedding for similarity search
     embedding = Column(

@@ -64,6 +64,10 @@ class ArticleProcessor:
                 article.industry = self._classify_industry(
                     article.title, article.content or "", article.summary or "")
 
+                # Generate keywords
+                article.keywords = self._generate_keywords(
+                    article.title, article.content or "", article.summary or "")
+
                 # Generate embeddings for vector search
                 article.embedding = self._generate_embedding(
                     f"{article.title}. {article.summary or article.content or ''}"
@@ -324,3 +328,80 @@ Return your answer in JSON format with these fields:
         except Exception as e:
             print(f"Error using OpenAI to extract metadata: {e}")
             return None, None
+
+    def _generate_keywords(self, title: str, content: str, summary: str) -> List[str]:
+        """Generate 3 relevant keywords for the article using OpenAI"""
+        try:
+            # Combine title and summary for keyword extraction
+            text = f"Title: {title}\nSummary: {summary}\nExcerpt: {content[:500]}..."
+
+            prompt = f"""
+Extract exactly 3 relevant keywords from this article that best represent its key topics.
+Return only the keywords as a JSON array of strings.
+Make each keyword a single word or short phrase (2-3 words maximum).
+Focus on specific, meaningful terms rather than generic ones.
+
+Article:
+{text}
+
+Output format:
+["keyword1", "keyword2", "keyword3"]
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system",
+                        "content": "You extract precise keywords from articles."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+
+            # Parse the response which should be a JSON array
+            result = json.loads(response.choices[0].message.content)
+
+            # Ensure we have an array of keywords
+            if isinstance(result, dict) and "keywords" in result:
+                keywords = result["keywords"]
+            elif isinstance(result, list):
+                keywords = result
+            else:
+                # Fall back to regex extraction if the format is unexpected
+                content = response.choices[0].message.content
+                keywords = re.findall(r'"([^"]*)"', content)
+
+            # Limit to 3 keywords, normalize casing
+            keywords = [k.strip().lower() for k in keywords[:3] if k.strip()]
+
+            # Ensure we have exactly 3 keywords
+            while len(keywords) < 3:
+                industry_keywords = {
+                    Industry.BFSI: ["finance", "banking", "investment"],
+                    Industry.RETAIL: ["retail", "ecommerce", "shopping"],
+                    Industry.HEALTHCARE: ["healthcare", "medical", "wellness"],
+                    Industry.TECHNOLOGY: ["technology", "innovation", "digital"],
+                    Industry.OTHER: ["business", "industry", "market"]
+                }
+                default_keywords = industry_keywords.get(Industry.OTHER)
+                for kw in default_keywords:
+                    if kw not in keywords:
+                        keywords.append(kw)
+                        if len(keywords) >= 3:
+                            break
+
+            return keywords[:3]
+
+        except Exception as e:
+            print(f"Error generating keywords: {e}")
+            # Fallback keywords based on industry
+            industry_fallbacks = {
+                Industry.BFSI: ["finance", "banking", "investment"],
+                Industry.RETAIL: ["retail", "ecommerce", "shopping"],
+                Industry.HEALTHCARE: ["healthcare", "medical", "wellness"],
+                Industry.TECHNOLOGY: ["technology", "innovation", "digital"],
+                Industry.OTHER: ["business", "industry", "market"]
+            }
+            return industry_fallbacks.get(Industry.OTHER)
