@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
+import random  # For generating demo images
 # Updated import for pgvector 0.4.1
 
 from app.db.models import Article, Industry
@@ -45,16 +46,30 @@ def get_articles(
     # Convert to dictionary to add metadata
     result = []
     for article in articles:
+        # Generate placeholder image if none exists
+        image_url = article.image_url
+        if not image_url:
+            # Generate industry-specific placeholder images
+            industry_placeholders = {
+                Industry.BFSI: "https://source.unsplash.com/random/300x200/?finance,banking",
+                Industry.RETAIL: "https://source.unsplash.com/random/300x200/?retail,shopping",
+                Industry.HEALTHCARE: "https://source.unsplash.com/random/300x200/?healthcare,medical",
+                Industry.TECHNOLOGY: "https://source.unsplash.com/random/300x200/?technology,ai",
+                Industry.OTHER: "https://source.unsplash.com/random/300x200/?business"
+            }
+            image_url = industry_placeholders.get(
+                article.industry, industry_placeholders[Industry.OTHER])
+
         article_dict = {
             "id": article.id,
             "title": article.title,
             "url": article.url,
-            "author": article.author,
+            "author": article.author or "Unknown Author",
             "published_at": article.published_at,
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
-            "image_url": article.image_url,
+            "image_url": image_url,
             "source": {
                 "id": article.source.id,
                 "name": article.source.name,
@@ -85,7 +100,8 @@ def search_articles(
     query = db.query(
         Article,
         # Calculate similarity score using cosine_distance (1 - distance gives similarity)
-        (1 - Article.embedding.cosine_distance(query_embedding)).label("similarity_score")
+        (1 - Article.embedding.cosine_distance(query_embedding)
+         ).label("similarity_score")
     )
 
     # Apply industry filter if provided

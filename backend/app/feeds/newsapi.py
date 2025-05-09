@@ -16,7 +16,18 @@ class NewsAPIConnector(BaseConnector):
     def __init__(self, db: Session, topics: List[str] = None):
         super().__init__(db, SourceType.NEWS_API)
         self.topics = topics or [
-            "artificial intelligence", "generative ai", "ai technology"]
+            # General AI topics
+            "artificial intelligence", "generative ai", "ai technology",
+            # BFSI-specific topics
+            "ai banking", "fintech ai", "AI financial services", "insurtech",
+            "AI banking innovation", "AI finance applications",
+            # Retail-specific topics
+            "ai retail", "retail technology ai", "ecommerce ai",
+            "ai shopping innovation", "retail automation ai",
+            # Healthcare-specific topics
+            "healthcare ai", "medical ai innovation", "ai patient care",
+            "ai diagnostics", "telemedicine ai"
+        ]
         self.api_key = settings.NEWSAPI_KEY
 
     def _parse_datetime(self, date_str: str) -> Optional[datetime]:
@@ -35,11 +46,11 @@ class NewsAPIConnector(BaseConnector):
     def fetch_articles(self, since: Optional[datetime] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """Fetch articles from NewsAPI based on configured topics"""
         results = []
-        
+
         # Ensure since has timezone info if provided
         if since and since.tzinfo is None:
             since = since.replace(tzinfo=timezone.utc)
-            
+
         # Format the 'from' parameter for NewsAPI - use UTC date
         # Look back 30 days instead of using since parameter to ensure we get results
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
@@ -67,29 +78,33 @@ class NewsAPIConnector(BaseConnector):
 
             try:
                 # Make the API request
-                print(f"[DEBUG] Querying NewsAPI for topic: '{topic}' with params: {params}")
+                print(
+                    f"[DEBUG] Querying NewsAPI for topic: '{topic}' with params: {params}")
                 response = requests.get(self.BASE_URL, params=params)
                 response.raise_for_status()  # Raise exception for 4XX/5XX responses
                 data = response.json()
-                print(f"[DEBUG] NewsAPI returned {len(data.get('articles', []))} articles for topic '{topic}', total results: {data.get('totalResults', 0)}")
+                print(
+                    f"[DEBUG] NewsAPI returned {len(data.get('articles', []))} articles for topic '{topic}', total results: {data.get('totalResults', 0)}")
 
                 # Process articles
                 for article in data.get('articles', []):
                     published_at = self._parse_datetime(
                         article.get('publishedAt', ''))
-                    
+
                     # Skip if we couldn't parse the datetime or it's None
                     if not published_at:
                         continue
 
                     # Ensure timezone info is present
                     if published_at.tzinfo is None:
-                        published_at = published_at.replace(tzinfo=timezone.utc)
-                        
+                        published_at = published_at.replace(
+                            tzinfo=timezone.utc)
+
                     # Skip if older than 'since' parameter (with proper timezone handling)
                     if since:
                         # Ensure since has timezone info
-                        since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+                        since_aware = since if since.tzinfo else since.replace(
+                            tzinfo=timezone.utc)
                         if published_at < since_aware:
                             continue
 
@@ -113,7 +128,8 @@ class NewsAPIConnector(BaseConnector):
 
             except Exception as e:
                 # Log error but continue with other topics
-                print(f"[ERROR] Error fetching from NewsAPI for topic '{topic}': {e}")
+                print(
+                    f"[ERROR] Error fetching from NewsAPI for topic '{topic}': {e}")
                 # Print full exception details for debugging
                 import traceback
                 print(traceback.format_exc())

@@ -17,7 +17,18 @@ class GoogleNewsConnector(BaseConnector):
     def __init__(self, db: Session, topics: List[str] = None):
         super().__init__(db, SourceType.GOOGLE_NEWS)
         self.topics = topics or [
-            "artificial intelligence", "generative ai", "ai technology"]
+            # General AI topics
+            "artificial intelligence", "generative ai", "ai technology",
+            # BFSI-specific topics
+            "ai banking", "fintech ai", "AI financial services", "insurtech",
+            "AI banking innovation", "AI finance applications",
+            # Retail-specific topics
+            "ai retail", "retail technology ai", "ecommerce ai",
+            "ai shopping innovation", "retail automation ai",
+            # Healthcare-specific topics
+            "healthcare ai", "medical ai innovation", "ai patient care",
+            "ai diagnostics", "telemedicine ai"
+        ]
 
     def _build_url(self, query: str) -> str:
         """Build Google News RSS URL for the given query"""
@@ -39,8 +50,9 @@ class GoogleNewsConnector(BaseConnector):
         if since:
             print(f"[DEBUG] Google News looking for articles since: {since}")
         else:
-            print(f"[DEBUG] Google News looking for all available articles (no date filter)")
-            
+            print(
+                f"[DEBUG] Google News looking for all available articles (no date filter)")
+
         for topic in self.topics:
             # Create or get source for this topic
             source = self.get_or_create_source(
@@ -51,12 +63,15 @@ class GoogleNewsConnector(BaseConnector):
 
             # Fetch the RSS feed
             feed_url = self._build_url(topic)
-            print(f"[DEBUG] Querying Google News for topic: '{topic}' with URL: {feed_url}")
+            print(
+                f"[DEBUG] Querying Google News for topic: '{topic}' with URL: {feed_url}")
             try:
                 feed = feedparser.parse(feed_url)
-                print(f"[DEBUG] Google News returned {len(feed.entries)} entries for topic '{topic}'")
+                print(
+                    f"[DEBUG] Google News returned {len(feed.entries)} entries for topic '{topic}'")
             except Exception as e:
-                print(f"[ERROR] Error fetching from Google News for topic '{topic}': {e}")
+                print(
+                    f"[ERROR] Error fetching from Google News for topic '{topic}': {e}")
                 import traceback
                 print(traceback.format_exc())
                 continue
