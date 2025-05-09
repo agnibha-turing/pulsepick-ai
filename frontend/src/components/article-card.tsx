@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,48 @@ export function ArticleCard({ article }: ArticleCardProps) {
     });
   };
 
+  // Extract keywords from the article
+  const getKeywords = () => {
+    // Extract important words from title and summary
+    const combinedText = `${article.title} ${article.summary.join(' ')}`;
+    
+    // These would typically come from an AI service, but for demo we'll extract:
+    // 1. Any capitalized terms (likely proper nouns)
+    // 2. Common industry terms based on the categories
+    
+    const keywords = [];
+    
+    // Add some industry-specific keywords based on categories
+    if (article.categories.includes("BFSI")) {
+      keywords.push("Finance", "Banking", "Investment");
+    }
+    if (article.categories.includes("Retail")) {
+      keywords.push("Commerce", "Customer Experience", "Sales");
+    }
+    if (article.categories.includes("Tech")) {
+      keywords.push("Innovation", "Digital", "Software");
+    }
+    if (article.categories.includes("Healthcare")) {
+      keywords.push("Medical", "Patient Care", "Treatment");
+    }
+    
+    // Extract percentage statistics from summary
+    const percentageMatches = combinedText.match(/\d+%/g);
+    if (percentageMatches) {
+      keywords.push(...percentageMatches.slice(0, 2));
+    }
+    
+    // Extract AI-related terms if present
+    if (combinedText.toLowerCase().includes("ai") || 
+        combinedText.toLowerCase().includes("artificial intelligence")) {
+      keywords.push("AI");
+    }
+    
+    // Limit to 5 keywords max
+    return [...new Set(keywords)].slice(0, 5);
+  };
+
+  const keywords = getKeywords();
   const displayCategories = article.categories.slice(0, 3);
   const extraCategories = article.categories.length > 3 ? article.categories.length - 3 : 0;
 
@@ -125,15 +168,13 @@ export function ArticleCard({ article }: ArticleCardProps) {
           </div>
           
           {/* Keywords */}
-          {article.keywords && article.keywords.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-2">
-              {article.keywords.map((keyword) => (
-                <Badge key={keyword} variant="outline" className="text-xs bg-background border-primary/30 text-muted-foreground">
-                  {keyword}
-                </Badge>
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-1 mt-2">
+            {keywords.map((keyword) => (
+              <Badge key={keyword} variant="outline" className="text-xs bg-background border-primary/30 text-muted-foreground">
+                {keyword}
+              </Badge>
+            ))}
+          </div>
         </CardHeader>
         
         <CardFooter className="pt-1 pb-4 flex justify-between items-center mt-auto">

@@ -70,7 +70,6 @@ def get_articles(
             "industry": article.industry,
             "relevance_score": article.relevance_score,
             "image_url": image_url,
-            "keywords": article.keywords or [],
             "source": {
                 "id": article.source.id,
                 "name": article.source.name,
@@ -128,7 +127,6 @@ def search_articles(
             "industry": article.industry,
             "relevance_score": article.relevance_score,
             "image_url": article.image_url,
-            "keywords": article.keywords or [],
             "similarity_score": round(float(similarity), 4),
             "source": {
                 "id": article.source.id,
