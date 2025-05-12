@@ -123,6 +123,7 @@ def get_articles(
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
+            "keywords": article.keywords if article.keywords else ["AI", "Technology", "News"],
             "source": {
                 "id": article.source.id,
                 "name": article.source.name,
@@ -179,6 +180,7 @@ def search_articles(
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
+            "keywords": article.keywords if article.keywords else ["AI", "Technology", "News"],
             "similarity_score": round(float(similarity), 4),
             "source": {
                 "id": article.source.id,

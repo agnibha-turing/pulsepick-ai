@@ -64,6 +64,10 @@ class ArticleProcessor:
                 article.industry = self._classify_industry(
                     article.title, article.content or "", article.summary or "")
 
+                # Extract keywords
+                article.keywords = self._extract_keywords(
+                    article.title, article.content or "", article.summary or "")
+
                 # Generate embeddings for vector search
                 article.embedding = self._generate_embedding(
                     f"{article.title}. {article.summary or article.content or ''}"
@@ -321,3 +325,39 @@ Return your answer in JSON format with these fields:
         except Exception as e:
             print(f"Error using OpenAI to extract metadata: {e}")
             return None, None
+
+    def _extract_keywords(self, title: str, content: str, summary: str) -> List[str]:
+        """Extract 3 relevant keywords from the article using OpenAI"""
+        try:
+            # Combine title and summary for keyword extraction
+            text = f"Title: {title}\nSummary: {summary}\nExcerpt: {content[:500]}..."
+
+            prompt = f"Extract exactly 3 most relevant keywords or key phrases from this article. Return only the keywords separated by commas, with no numbering or additional text:\n\n{text}"
+
+            response = self.openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that extracts relevant keywords from articles."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50,
+                temperature=0.3
+            )
+
+            keywords_text = response.choices[0].message.content.strip()
+
+            # Split by commas and clean up
+            keywords = [k.strip() for k in keywords_text.split(',')]
+
+            # Ensure we have exactly 3 keywords
+            if len(keywords) > 3:
+                keywords = keywords[:3]
+            while len(keywords) < 3:
+                keywords.append("")  # Add empty strings if we got fewer than 3
+
+            return keywords
+
+        except Exception as e:
+            print(f"Error extracting keywords: {e}")
+            # Return default keywords on failure
+            return ["AI", "Technology", "News"]

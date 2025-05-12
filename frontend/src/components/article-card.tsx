@@ -1,9 +1,8 @@
-
 import { useState } from "react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Article } from "@/services/article-service";
+import { DisplayArticle } from "@/services/article-service";
 import { Share, Heart, BookmarkPlus, Linkedin, Twitter, Mail, MessageSquare } from "lucide-react";
 import { 
   Dialog,
@@ -22,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 interface ArticleCardProps {
-  article: Article;
+  article: DisplayArticle;
 }
 
 export function ArticleCard({ article }: ArticleCardProps) {
@@ -59,7 +58,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
       linkedin: `I wanted to share this valuable industry insight from PulsePick: "${article.title}". This could impact our strategy in the ${article.categories[0]} sector. #ThoughtLeadership #${article.categories[0].replace(/\s+/g, '')} #IndustryInsights`,
       twitter: `Key finding: ${article.summary[0].substring(0, 100)}... (via @PulsePick) #${article.categories[0].replace(/\s+/g, '')}`,
       email: `Subject: Strategic insight to consider\n\nHi team,\n\nThis recent analysis could be valuable for our upcoming planning:\n\n"${article.title}"\n\nKey points:\n- ${article.summary[0]}\n\nLet's discuss this at our next meeting.\n\nBest,`,
-      slack: `*Strategic insight alert* 📊\n"${article.title}"\n>${article.summary[0]}\nSource: ${article.source} | Relevance score: ${article.trendingScore}/100`
+      slack: `*Strategic insight alert* 📊\n"${article.title}"\n>${article.summary[0]}\nSource: ${article.source}`
     };
 
     switch(platform) {
@@ -82,48 +81,8 @@ export function ArticleCard({ article }: ArticleCardProps) {
     });
   };
 
-  // Extract keywords from the article
-  const getKeywords = () => {
-    // Extract important words from title and summary
-    const combinedText = `${article.title} ${article.summary.join(' ')}`;
-    
-    // These would typically come from an AI service, but for demo we'll extract:
-    // 1. Any capitalized terms (likely proper nouns)
-    // 2. Common industry terms based on the categories
-    
-    const keywords = [];
-    
-    // Add some industry-specific keywords based on categories
-    if (article.categories.includes("BFSI")) {
-      keywords.push("Finance", "Banking", "Investment");
-    }
-    if (article.categories.includes("Retail")) {
-      keywords.push("Commerce", "Customer Experience", "Sales");
-    }
-    if (article.categories.includes("Tech")) {
-      keywords.push("Innovation", "Digital", "Software");
-    }
-    if (article.categories.includes("Healthcare")) {
-      keywords.push("Medical", "Patient Care", "Treatment");
-    }
-    
-    // Extract percentage statistics from summary
-    const percentageMatches = combinedText.match(/\d+%/g);
-    if (percentageMatches) {
-      keywords.push(...percentageMatches.slice(0, 2));
-    }
-    
-    // Extract AI-related terms if present
-    if (combinedText.toLowerCase().includes("ai") || 
-        combinedText.toLowerCase().includes("artificial intelligence")) {
-      keywords.push("AI");
-    }
-    
-    // Limit to 5 keywords max
-    return [...new Set(keywords)].slice(0, 5);
-  };
-
-  const keywords = getKeywords();
+  // We'll use the backend-provided keywords if available
+  const keywords = article.keywords || [];
   const displayCategories = article.categories.slice(0, 3);
   const extraCategories = article.categories.length > 3 ? article.categories.length - 3 : 0;
 
@@ -140,9 +99,6 @@ export function ArticleCard({ article }: ArticleCardProps) {
               <span className="text-xs text-muted-foreground">•</span>
               <span className="text-xs text-muted-foreground">{new Date(article.date).toLocaleDateString()}</span>
             </div>
-            <Badge variant="outline" className="text-xs px-2 bg-primary/10 border-primary/20">
-              {article.trendingScore}
-            </Badge>
           </div>
           
           <CardTitle className="text-lg font-bold line-clamp-2">

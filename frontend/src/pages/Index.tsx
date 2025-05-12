@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -6,7 +5,7 @@ import { ArticleCard } from "@/components/article-card";
 import { FilterChips } from "@/components/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getArticles, Article } from "@/services/article-service";
+import { getArticles, DisplayArticle } from "@/services/article-service";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -33,12 +32,12 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 
-const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Tech", "Healthcare"];
+const AVAILABLE_INDUSTRIES = ["All", "BFSI", "RETAIL", "TECHNOLOGY", "HEALTHCARE", "OTHER"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
 const AVAILABLE_TIME_PERIODS = ["Today", "7 Days", "30 Days", "Custom"];
 
 const Index = () => {
-  const [articles, setArticles] = useState<Article[]>([]);
+  const [articles, setArticles] = useState<DisplayArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -223,7 +222,7 @@ const Index = () => {
         <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold">
-              {activeIndustry === "All" ? "All Industries" : activeIndustry} Content
+              {activeIndustry === "All" ? "All Industries" : activeIndustry}
             </h1>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
