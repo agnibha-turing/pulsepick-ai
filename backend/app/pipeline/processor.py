@@ -172,18 +172,14 @@ class ArticleProcessor:
 
     def _calculate_relevance_score(self, article: Article) -> float:
         """
-        Calculate a relevance score for the article based on multiple factors:
-        1. Recency - newer articles get higher scores
-        2. Industry weighting - prioritize underrepresented industries
+        Calculate a relevance score for the article based solely on recency.
 
-        Formula: score = recency_score * industry_weight
+        Formula: score = recency_score
         - A fresh article (0 days) has recency_score 1.0
         - A 1-day old article has recency_score ~0.6
         - A 3-day old article has recency_score ~0.22
-
-        Industry weights increase relevance for BFSI, Retail, and Other categories
         """
-        # Base recency score (same as before)
+        # Base recency score
         recency_score = 0.0
         if article.published_at:
             # Ensure both dates are timezone-aware for comparison
@@ -196,21 +192,8 @@ class ArticleProcessor:
             decay_factor = 0.5  # Controls how quickly relevance decays with age
             recency_score = math.exp(-decay_factor * max(0, days_old))
 
-        # Industry weighting to prioritize underrepresented industries
-        industry_weights = {
-            Industry.BFSI: 2.0,       # Highest priority - strongly boost BFSI
-            Industry.RETAIL: 1.8,     # High priority - boost retail articles
-            Industry.OTHER: 1.5,       # Medium priority
-            Industry.HEALTHCARE: 1.2,  # Slight boost
-            # No change for tech (already well-represented)
-            Industry.TECHNOLOGY: 1.0
-        }
-
-        # Get industry weight (default to 1.0 if industry is not set)
-        industry_weight = industry_weights.get(article.industry, 1.0)
-
-        # Combine scores for final relevance
-        return recency_score * industry_weight
+        # Return just the recency score without industry weighting
+        return recency_score
 
     def _enrich_metadata(self, title: str, content: str, url: str, raw_json: dict) -> Tuple[Optional[str], Optional[datetime]]:
         """

@@ -12,6 +12,7 @@ from app.feeds.newsapi import NewsAPIConnector
 from app.feeds.linkedin import LinkedInConnector
 from app.pipeline.processor import ArticleProcessor
 from app.core.config import settings
+from app.db.models import Industry, Article
 
 
 # Configure logging
@@ -19,20 +20,62 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task
-def fetch_google_news():
+def fetch_google_news(industry=None):
     """Fetch articles from Google News RSS and process them"""
     db = SessionLocal()
     try:
-        logger.info("Fetching articles from Google News")
-        connector = GoogleNewsConnector(db)
-        articles = connector.fetch_since(
-            days=1, limit=settings.ARTICLE_FETCH_LIMIT // 2)  # Reduced to 50% of total limit
+        # If industry is specified, use industry-specific topics
+        if industry:
+            logger.info(
+                f"Fetching articles from Google News for industry: {industry}")
+
+            # Define industry-specific topics
+            industry_topics = {
+                Industry.BFSI: [
+                    "ai banking", "fintech ai", "AI financial services", "insurtech",
+                    "AI banking innovation", "AI finance applications"
+                ],
+                Industry.RETAIL: [
+                    "ai retail", "retail technology ai", "ecommerce ai",
+                    "ai shopping innovation", "retail automation ai"
+                ],
+                Industry.HEALTHCARE: [
+                    "healthcare ai", "medical ai innovation", "ai patient care",
+                    "ai diagnostics", "telemedicine ai"
+                ],
+                Industry.TECHNOLOGY: [
+                    "artificial intelligence", "generative ai", "ai technology"
+                ],
+                Industry.OTHER: [
+                    "business ai", "enterprise ai", "operational ai"
+                ]
+            }
+
+            # Get topics for this industry
+            topics = industry_topics.get(industry, ["artificial intelligence"])
+
+            # Create connector with specific topics
+            connector = GoogleNewsConnector(db, topics=topics)
+
+            # Fetch twice as many articles per industry to ensure we have enough after filtering
+            articles_per_industry = (
+                settings.ARTICLE_FETCH_LIMIT // len(Industry)) * 2
+            articles = connector.fetch_since(
+                days=7, limit=articles_per_industry)
+        else:
+            # Default behavior for backward compatibility
+            logger.info("Fetching articles from Google News (all topics)")
+            connector = GoogleNewsConnector(db)
+            articles = connector.fetch_since(
+                days=7, limit=settings.ARTICLE_FETCH_LIMIT // 2)  # Reduced to 50% of total limit
 
         if articles:
-            logger.info(f"Found {len(articles)} new articles from Google News")
+            logger.info(
+                f"Found {len(articles)} new articles from Google News{' for ' + industry if industry else ''}")
             process_articles.delay(articles)
         else:
-            logger.info("No new articles found from Google News")
+            logger.info(
+                f"No new articles found from Google News{' for ' + industry if industry else ''}")
 
         return len(articles)
 
@@ -137,17 +180,55 @@ def process_articles(articles):
 
 
 @celery_app.task
+def update_all_relevance_scores():
+    """Update all existing articles' relevance scores based on the new recency-only formula"""
+    db = SessionLocal()
+    try:
+        logger.info("Starting update of all article relevance scores")
+
+        # Get all articles
+        articles = db.query(Article).all()
+        count = 0
+
+        # Create processor
+        processor = ArticleProcessor(db)
+
+        for article in articles:
+            # Calculate new relevance score
+            article.relevance_score = processor._calculate_relevance_score(
+                article)
+            count += 1
+
+        # Commit all changes
+        db.commit()
+        logger.info(
+            f"Successfully updated relevance scores for {count} articles")
+        return count
+
+    except Exception as e:
+        logger.error(f"Error updating relevance scores: {e}")
+        db.rollback()
+        return 0
+
+    finally:
+        db.close()
+
+
+@celery_app.task
 def fetch_all_articles():
-    """Fetch articles from all sources in parallel"""
-    logger.info("Starting scheduled article fetch from all sources")
+    """Fetch articles from all sources with balanced industry distribution"""
+    logger.info(
+        "Starting scheduled article fetch from all sources with balanced distribution")
 
-    # Create a group of tasks to run in parallel
-    job = group([
-        fetch_google_news.s(),
-        # fetch_linkedin.s(),
-        # fetch_newsapi.s()  # Commented out as per requirements
-    ])
+    # Remove general fetch and keep only industry-specific fetches for efficiency
+    industry_jobs = []
+    for industry in [i.value for i in Industry]:
+        # Create a task for each industry
+        job = fetch_google_news.s(industry=industry)
+        result = job.apply_async()
+        industry_jobs.append(result)
 
-    # Execute the group
-    result = job.apply_async()
-    return "Scheduled article fetch tasks"
+    # Run 5 minutes after fetch completes
+    update_all_relevance_scores.apply_async(countdown=300)
+
+    return "Scheduled balanced article fetch tasks"
