@@ -52,7 +52,7 @@ const Index = () => {
     const fetchArticles = async () => {
       setLoading(true);
       try {
-        let filters = [...activeFilters];
+        const filters = [...activeFilters];
         if (activeIndustry !== "All") {
           filters.push(activeIndustry);
         }
