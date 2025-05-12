@@ -46,20 +46,6 @@ def get_articles(
     # Convert to dictionary to add metadata
     result = []
     for article in articles:
-        # Generate placeholder image if none exists
-        image_url = article.image_url
-        if not image_url:
-            # Generate industry-specific placeholder images
-            industry_placeholders = {
-                Industry.BFSI: "https://source.unsplash.com/random/300x200/?finance,banking",
-                Industry.RETAIL: "https://source.unsplash.com/random/300x200/?retail,shopping",
-                Industry.HEALTHCARE: "https://source.unsplash.com/random/300x200/?healthcare,medical",
-                Industry.TECHNOLOGY: "https://source.unsplash.com/random/300x200/?technology,ai",
-                Industry.OTHER: "https://source.unsplash.com/random/300x200/?business"
-            }
-            image_url = industry_placeholders.get(
-                article.industry, industry_placeholders[Industry.OTHER])
-
         article_dict = {
             "id": article.id,
             "title": article.title,
@@ -69,7 +55,6 @@ def get_articles(
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
-            "image_url": image_url,
             "source": {
                 "id": article.source.id,
                 "name": article.source.name,
@@ -126,7 +111,6 @@ def search_articles(
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
-            "image_url": article.image_url,
             "similarity_score": round(float(similarity), 4),
             "source": {
                 "id": article.source.id,

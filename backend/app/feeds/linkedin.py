@@ -196,10 +196,6 @@ class LinkedInConnector(BaseConnector):
                 else:
                     published_at = datetime.now() - timedelta(days=random.randint(0, 3))
 
-                # Extract image if available
-                img_element = await post.query_selector("img")
-                image_url = await img_element.get_attribute("src") if img_element else None
-
                 # Create source for this hashtag
                 source_id = self._get_source_id(industry, hashtag)
 
@@ -215,14 +211,12 @@ class LinkedInConnector(BaseConnector):
                     'author': author,
                     'published_at': published_at,
                     'content': text_content[:1000],  # Limit content length
-                    'image_url': image_url,
                     'raw_json': {
                         'title': title[:200],
                         'url': link or url,
                         'author': author,
                         'date': published_at.isoformat(),
                         'content': text_content[:1000],
-                        'image_url': image_url,
                         'industry': industry,
                         'hashtag': hashtag,
                         'source_type': 'linkedin'

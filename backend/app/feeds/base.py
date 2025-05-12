@@ -49,7 +49,6 @@ class BaseConnector(ABC):
             - published_at: Optional[datetime]
             - content: Optional[str]
             - author: Optional[str]
-            - image_url: Optional[str]
         """
         pass
 

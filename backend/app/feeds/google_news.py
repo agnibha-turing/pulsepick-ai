@@ -55,55 +55,11 @@ class GoogleNewsConnector(BaseConnector):
             except Exception:
                 return None
 
-    def _extract_image_url(self, entry: Dict[str, Any]) -> Optional[str]:
-        """Extract image URL from entry if available"""
-        # Check for media content
-        if 'media_content' in entry and entry['media_content']:
-            for media in entry['media_content']:
-                if 'url' in media:
-                    return media['url']
-
-        # Check for media thumbnail
-        if 'media_thumbnail' in entry and entry['media_thumbnail']:
-            for thumbnail in entry['media_thumbnail']:
-                if 'url' in thumbnail:
-                    return thumbnail['url']
-
-        # Try to extract from content if present
-        if 'content' in entry and entry['content']:
-            content = entry['content'][0]['value'] if isinstance(
-                entry['content'], list) else entry['content']
-            img_match = re.search(r'<img[^>]+src="([^">]+)"', content)
-            if img_match:
-                return img_match.group(1)
-
-        # Try to extract from summary
-        if 'summary' in entry:
-            img_match = re.search(r'<img[^>]+src="([^">]+)"', entry['summary'])
-            if img_match:
-                return img_match.group(1)
-
-        return None
-
-    def _extract_author(self, entry: Dict[str, Any]) -> str:
-        """Extract author information from entry"""
-        # Check direct author field
-        if 'author' in entry and entry['author']:
+    def _extract_author(self, entry: Dict[str, Any]) -> Optional[str]:
+        """Extract author from entry if available"""
+        if 'author' in entry:
             return entry['author']
-
-        # Check source field
-        if 'source' in entry and entry['source']:
-            if isinstance(entry['source'], dict) and 'title' in entry['source']:
-                return entry['source']['title']
-            return str(entry['source'])
-
-        # Extract from title if it contains source at the end (common in Google News)
-        if 'title' in entry and ' - ' in entry['title']:
-            parts = entry['title'].split(' - ')
-            if len(parts) > 1:
-                return parts[-1]
-
-        return "Unknown Author"
+        return None
 
     def fetch_articles(self, since: Optional[datetime] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """Fetch articles from Google News based on configured topics"""
@@ -153,7 +109,6 @@ class GoogleNewsConnector(BaseConnector):
 
                 # Extract more metadata
                 author = self._extract_author(entry)
-                image_url = self._extract_image_url(entry)
 
                 # Extract data
                 article = {
@@ -163,7 +118,6 @@ class GoogleNewsConnector(BaseConnector):
                     'author': author,
                     'published_at': published_at,
                     'content': entry.get('summary', ''),
-                    'image_url': image_url,
                     'raw_json': dict(entry)
                 }
 
