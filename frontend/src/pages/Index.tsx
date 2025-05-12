@@ -20,7 +20,8 @@ import {
   Menu,
   Home,
   User,
-  Settings
+  Settings,
+  SlidersHorizontal
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -32,7 +33,7 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 
-const AVAILABLE_INDUSTRIES = ["All", "BFSI", "RETAIL", "TECHNOLOGY", "HEALTHCARE", "OTHER"];
+const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Technology", "Healthcare", "Other"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
 const AVAILABLE_TIME_PERIODS = ["Today", "7 Days", "30 Days", "Custom"];
 
@@ -40,7 +41,8 @@ const Index = () => {
   const [articles, setArticles] = useState<DisplayArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(false);
   const [activeIndustry, setActiveIndustry] = useState("All");
   const [contentTypes, setContentTypes] = useState<string[]>(["Articles"]);
   const [timePeriod, setTimePeriod] = useState("7 Days");
@@ -158,7 +160,7 @@ const Index = () => {
               <AvatarFallback className="bg-primary/10 text-primary">JS</AvatarFallback>
             </Avatar>
             
-            <Button variant="outline" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
+            <Button variant="outline" size="icon" className="md:hidden" onClick={() => setMobileSidebarOpen(true)}>
               <Menu className="h-5 w-5" />
             </Button>
           </div>
@@ -195,15 +197,15 @@ const Index = () => {
           <Button 
             size="icon" 
             className="rounded-full shadow-lg h-12 w-12"
-            onClick={() => setSidebarOpen(true)}
+            onClick={() => setMobileSidebarOpen(true)}
           >
-            <Filter />
+            <SlidersHorizontal />
           </Button>
         </div>
         
         {/* Mobile sidebar */}
-        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="left" className="w-[300px] sm:w-[400px] p-0">
+        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+          <SheetContent side="left" className="w-[300px] sm:w-[400px] p-0 lg:hidden">
             <SheetHeader className="p-6 pb-2">
               <SheetTitle>Filters</SheetTitle>
             </SheetHeader>
@@ -214,7 +216,7 @@ const Index = () => {
         </Sheet>
         
         {/* Desktop sidebar */}
-        <aside className="hidden lg:block w-[300px] p-6 border-r sticky top-32 self-start">
+        <aside className={`hidden lg:block w-[300px] p-6 border-r sticky top-32 self-start ${desktopSidebarOpen ? 'block' : 'lg:hidden'}`}>
           {renderFilterContent()}
         </aside>
         
@@ -225,8 +227,13 @@ const Index = () => {
               {activeIndustry === "All" ? "All Industries" : activeIndustry}
             </h1>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
-                <Search className="h-4 w-4" />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="hidden sm:flex gap-2"
+                onClick={() => setDesktopSidebarOpen(!desktopSidebarOpen)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
                 <span>Filter</span>
               </Button>
               <Button variant="outline" size="sm" className="gap-2">
