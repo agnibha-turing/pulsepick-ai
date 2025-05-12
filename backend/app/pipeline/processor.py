@@ -1,5 +1,5 @@
 import openai
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 import math
@@ -186,7 +186,13 @@ class ArticleProcessor:
         # Base recency score (same as before)
         recency_score = 0.0
         if article.published_at:
-            days_old = (datetime.utcnow() - article.published_at).days
+            # Ensure both dates are timezone-aware for comparison
+            now = datetime.now(timezone.utc)
+            pub_date = article.published_at
+            if pub_date.tzinfo is None:
+                pub_date = pub_date.replace(tzinfo=timezone.utc)
+
+            days_old = (now - pub_date).days
             decay_factor = 0.5  # Controls how quickly relevance decays with age
             recency_score = math.exp(-decay_factor * max(0, days_old))
 
@@ -250,7 +256,13 @@ class ArticleProcessor:
                                 '%Y-%m-%d',  # Simple date
                             ]:
                                 try:
-                                    date = datetime.strptime(date_str, fmt)
+                                    parsed_date = datetime.strptime(
+                                        date_str, fmt)
+                                    # Add timezone info if missing
+                                    if parsed_date.tzinfo is None:
+                                        parsed_date = parsed_date.replace(
+                                            tzinfo=timezone.utc)
+                                    date = parsed_date
                                     break
                                 except ValueError:
                                     continue
@@ -315,7 +327,9 @@ Return your answer in JSON format with these fields:
             date = None
             if date_str and date_str != "null":
                 try:
-                    date = datetime.strptime(date_str, "%Y-%m-%d")
+                    # Parse the date and ensure it's timezone-aware (UTC)
+                    date = datetime.strptime(
+                        date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 except ValueError:
                     print(f"Could not parse date: {date_str}")
 

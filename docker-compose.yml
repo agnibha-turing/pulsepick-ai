@@ -49,6 +49,8 @@ services:
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
       - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS}
       - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - LINKEDIN_USERNAME=${LINKEDIN_USERNAME}
+      - LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}
     volumes:
       - ./backend:/app
     command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -57,6 +59,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - .env
     depends_on:
       - backend
       - redis
@@ -72,6 +76,9 @@ services:
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
       - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS}
       - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - LINKEDIN_USERNAME=${LINKEDIN_USERNAME}
+      - LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}
+      - LINKEDIN_LI_AT=${LINKEDIN_LI_AT}
     volumes:
       - ./backend:/app
     command: celery -A app.workers.celery_app worker --loglevel=info
@@ -80,6 +87,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - .env
     depends_on:
       - backend
       - redis
@@ -95,6 +104,9 @@ services:
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
       - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS}
       - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - LINKEDIN_USERNAME=${LINKEDIN_USERNAME}
+      - LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}
+      - LINKEDIN_LI_AT=${LINKEDIN_LI_AT}
     volumes:
       - ./backend:/app
     command: celery -A app.workers.celery_app beat --loglevel=info

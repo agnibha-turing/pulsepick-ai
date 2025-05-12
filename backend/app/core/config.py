@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # NewsAPI
     NEWSAPI_KEY: str
 
+    # LinkedIn
+    LINKEDIN_USERNAME: Optional[str] = None
+    LINKEDIN_PASSWORD: Optional[str] = None
+    LINKEDIN_LI_AT: Optional[str] = None
+
     # Feed Parameters
     FETCH_INTERVAL_MINUTES: int = 30
     ARTICLE_FETCH_LIMIT: int = 100
