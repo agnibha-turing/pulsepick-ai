@@ -95,7 +95,7 @@ def fetch_all_articles():
     # Create a group of tasks to run in parallel
     job = group([
         fetch_google_news.s(),
-        fetch_newsapi.s()
+        # fetch_newsapi.s()
     ])
 
     # Execute the group
