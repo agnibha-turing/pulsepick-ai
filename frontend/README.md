@@ -1,73 +1,105 @@
-# Welcome to your Lovable project
+# PulsePick Frontend
 
-## Project info
+PulsePick AI frontend is a modern React application for sales professionals to discover, curate, and share AI-related content with their clients and prospects.
 
-**URL**: https://lovable.dev/projects/7d8fef9c-03b3-48dc-be38-7cbf8a4ddc22
+## Features
 
-## How can I edit this code?
+- 📊 **Industry-specific Content Discovery**: Browse and filter content by industry (BFSI, Retail, Healthcare, etc.)
+- 👤 **Persona Management**: Create recipient personas with details like name, job title, company, and personality traits
+- 🔍 **Article Selection**: Select individual or multiple articles for sharing
+- ✉️ **Personalized Message Generation**: Create customized messages for LinkedIn, Twitter, Email, and Slack
+- 📱 **Responsive Design**: Fully mobile-responsive UI for on-the-go content curation
+- 🌙 **Dark Mode**: Built-in theme toggle for different lighting conditions
 
-There are several ways of editing your application.
+## Core Components
 
-**Use Lovable**
+### Persona Input
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/7d8fef9c-03b3-48dc-be38-7cbf8a4ddc22) and start prompting.
+- Create detailed recipient profiles including:
+  - Name and job title
+  - Company information
+  - Previous conversation context
+  - Personality traits for tone customization
 
-Changes made via Lovable will be committed automatically to this repo.
+### Article Selection
 
-**Use your preferred IDE**
+- Select single or multiple articles
+- Visual indicators for selected content
+- Floating action button for multi-article actions
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Message Generation
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- Generate personalized messages for multiple platforms:
+  - Email with subject lines and formal structure
+  - LinkedIn posts with professional tone and hashtags
+  - Twitter/X posts with concise wording
+  - Slack messages with casual formatting
+- AI-powered message creation that considers:
+  - Recipient's role and company
+  - Previous conversation context
+  - Personality traits and preferences
 
-Follow these steps:
+## Tech Stack
+
+- **Framework**: React with TypeScript
+- **Build Tool**: Vite
+- **Styling**: Tailwind CSS
+- **UI Components**: shadcn/ui
+- **State Management**: React Context
+- **Notifications**: Sonner toast notifications
+
+## Development Setup
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+# Install dependencies
+npm install
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Start development server
 npm run dev
+
+# Build for production
+npm run build
 ```
 
-**Edit a file directly in GitHub**
+## Environment Variables
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Create a `.env` file with the following:
 
-**Use GitHub Codespaces**
+```
+VITE_API_URL=http://localhost:8000/api
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## API Integration
 
-## What technologies are used for this project?
+The frontend communicates with the backend API for:
 
-This project is built with:
+- Fetching article content
+- Generating personalized messages
+- Filtering and sorting articles
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Folder Structure
 
-## How can I deploy this project?
+```
+src/
+├── components/        # UI components
+│   ├── article-card.tsx       # Article display and selection
+│   ├── message-dialog.tsx     # Message generation dialog
+│   ├── persona-input-card.tsx # Persona management component
+│   └── generate-message-fab.tsx # Floating action button
+├── context/           # React context providers
+│   ├── persona-context.tsx    # Recipient persona state
+│   └── selected-articles-context.tsx # Article selection state
+├── services/          # API services
+│   ├── article-service.ts     # Article fetching and filtering
+│   └── message-service.ts     # Message generation service
+└── pages/             # Application pages
+    └── Index.tsx      # Main content discovery page
+```
 
-Simply open [Lovable](https://lovable.dev/projects/7d8fef9c-03b3-48dc-be38-7cbf8a4ddc22) and click on Share -> Publish.
+## Extending the Application
 
-## Can I connect a custom domain to my Lovable project?
+Add new platform support by:
 
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+1. Adding a new platform option in `message-dialog.tsx`
+2. Extending the `message-service.ts` to support the new platform
+3. Update the backend prompt template to include platform-specific guidance

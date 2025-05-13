@@ -212,6 +212,14 @@ Platform: {platform.upper()}
 {"IMPORTANT - Direct message personalization:\n" + direct_content_guidance if direct_content_guidance else ""}
 {"Writing style guidance based on recipient personality:\n" + persona_style_guidance if persona_style_guidance else ""}
 
+EXTREMELY IMPORTANT - OUTPUT FORMAT INSTRUCTIONS:
+- Provide ONLY the actual message content that should be displayed to the recipient
+- DO NOT include any preamble like "Here's a message for LinkedIn" or "Certainly! Here's a..."
+- DO NOT include any explanations or notes about what you've created
+- DO NOT add dashes, separators, or formatting not intended for the recipient
+- DO NOT include ANY meta-commentary about the message
+- Start DIRECTLY with the content that should be displayed
+
 Make the message sound natural, personalized, and engaging. The personalization should be integrated naturally 
 into the message - not just mentioning their name, but truly tailoring the content to them.
 
