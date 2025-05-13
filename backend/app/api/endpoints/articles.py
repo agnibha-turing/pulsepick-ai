@@ -18,7 +18,7 @@ router = APIRouter()
 def get_articles(
     db: Session = Depends(get_db),
     industry: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
     sort_by: str = Query(
         "published_at", regex="^(published_at|relevance_score)$"),
