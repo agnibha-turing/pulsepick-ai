@@ -3,7 +3,8 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DisplayArticle } from "@/services/article-service";
-import { Share, BookmarkPlus, Linkedin, Twitter, Mail, MessageSquare, ArrowUpRight, ChevronDown } from "lucide-react";
+import { Share, BookmarkPlus, Linkedin, Twitter, Mail, MessageSquare, ArrowUpRight, ChevronDown, CheckSquare, Square } from "lucide-react";
+import { useSelectedArticles } from "@/context/selected-articles-context";
 import { 
   Dialog,
   DialogContent,
@@ -34,6 +35,8 @@ interface ExtendedArticle extends DisplayArticle {
 export function ArticleCard({ article }: ArticleCardProps) {
   // Treat article as ExtendedArticle to handle optional author field
   const extendedArticle = article as ExtendedArticle;
+  const { toggleArticleSelection, isArticleSelected } = useSelectedArticles();
+  const isSelected = isArticleSelected(article.id);
 
   const [shareOpen, setShareOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -92,8 +95,27 @@ export function ArticleCard({ article }: ArticleCardProps) {
     });
   };
 
+  // Toggle expansion or open details dialog
+  const toggleView = () => {
+    if (expanded) {
+      setExpanded(false);
+    } else {
+      setDetailsOpen(true);
+    }
+  };
+
+  // Handle selection on card click
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Only select when clicking on the card background, not on buttons or links
+    if ((e.target as HTMLElement).closest('button, a, .clickable-element')) {
+      return;
+    }
+    toggleArticleSelection(article);
+  };
+
   // Function to open the article URL
-  const openArticleUrl = () => {
+  const openArticleUrl = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card selection
     window.open(article.url, '_blank');
   };
 
@@ -104,8 +126,37 @@ export function ArticleCard({ article }: ArticleCardProps) {
 
   return (
     <>
-      <Card className="overflow-hidden transition-all flex flex-col h-[400px] w-full relative group hover:shadow-md">
-        <CardHeader className="pb-2 flex-shrink-0">
+      <Card 
+        className={`overflow-hidden transition-all flex flex-col h-[400px] w-full relative group hover:shadow-md cursor-pointer ${
+          isSelected ? 'ring-2 ring-primary bg-primary/5' : ''
+        }`}
+        onClick={handleCardClick}
+      >
+        {/* Selection overlay - appears on hover */}
+        <div className={`absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-0 ${isSelected ? 'opacity-30' : ''}`}></div>
+        
+        <CardHeader className="pb-2 flex-shrink-0 relative z-10">
+          {/* Selection indicator */}
+          <div className="absolute right-3 top-3 z-20">
+            <div 
+              className={`h-7 w-7 rounded-md flex items-center justify-center cursor-pointer transition-colors ${
+                isSelected 
+                  ? 'bg-primary text-primary-foreground' 
+                  : 'bg-background/80 backdrop-blur-sm hover:bg-background/90 border border-muted-foreground/30 group-hover:border-primary/50'
+              }`}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent double toggling from card click
+                toggleArticleSelection(article);
+              }}
+              title={isSelected ? "Deselect article" : "Select article for message"}
+            >
+              {isSelected 
+                ? <CheckSquare className="h-5 w-5" /> 
+                : <Square className="h-5 w-5 text-muted-foreground group-hover:text-primary" />
+              }
+            </div>
+          </div>
+          
           {/* Source info and date */}
           <div className="flex items-center gap-2 mb-3 text-xs text-muted-foreground">
             <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs text-primary font-medium">
@@ -126,17 +177,20 @@ export function ArticleCard({ article }: ArticleCardProps) {
         
         {/* Arrow link indicator at top right */}
         <div 
-          className="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+          className="absolute right-12 top-4 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10 clickable-element"
           onClick={openArticleUrl}
         >
           <ArrowUpRight className="h-5 w-5 text-primary hover:scale-110 transition-transform" />
         </div>
         
-        <div className="px-6 flex-grow flex flex-col overflow-hidden">
+        <div className="px-6 flex-grow flex flex-col overflow-hidden relative z-10">
           {/* Title with hover effect - now clickable */}
           <div 
-            className="mb-3 h-[72px] overflow-hidden relative cursor-pointer"
-            onClick={openArticleUrl}
+            className="mb-3 h-[72px] overflow-hidden relative cursor-pointer clickable-element"
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent card selection
+              openArticleUrl(e);
+            }}
           >
             <h3 className="text-lg font-bold leading-tight hover:text-primary hover:underline transition-colors">
               {article.title}
@@ -151,8 +205,11 @@ export function ArticleCard({ article }: ArticleCardProps) {
             <Button 
               variant="ghost" 
               size="sm" 
-              className="p-0 h-6 text-xs text-primary flex items-center gap-1 mt-1"
-              onClick={() => expanded ? setExpanded(false) : setDetailsOpen(true)}
+              className="p-0 h-6 text-xs text-primary flex items-center gap-1 mt-1 clickable-element"
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card selection
+                toggleView();
+              }}
             >
               {expanded ? "Show less" : "Read more"}
               <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`} />
@@ -190,7 +247,10 @@ export function ArticleCard({ article }: ArticleCardProps) {
           <Button 
             variant={saved ? "default" : "outline"} 
             size="sm"
-            onClick={() => setSaved(!saved)}
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent card selection
+              setSaved(!saved);
+            }}
             className="gap-2"
           >
             <BookmarkPlus className="h-4 w-4" />
@@ -198,7 +258,10 @@ export function ArticleCard({ article }: ArticleCardProps) {
           </Button>
           
           <Button 
-            onClick={() => setShareOpen(true)}
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent card selection
+              setShareOpen(true);
+            }}
             size="sm"
             className="gap-2"
           >
@@ -282,20 +345,27 @@ export function ArticleCard({ article }: ArticleCardProps) {
             <div className="flex gap-2">
               <Button 
                 variant={saved ? "default" : "outline"} 
-                onClick={() => setSaved(!saved)}
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent card selection
+                  setSaved(!saved);
+                }}
                 className="gap-2"
               >
                 <BookmarkPlus className="h-4 w-4" />
                 <span>Save</span>
               </Button>
-              <Button onClick={() => {
+              <Button onClick={(e) => {
+                e.stopPropagation(); // Prevent card selection
                 setShareOpen(true);
                 setDetailsOpen(false);
               }}>
                 <Share className="h-4 w-4 mr-2" />
                 Share
               </Button>
-              <Button onClick={openArticleUrl}>
+              <Button onClick={(e) => {
+                e.stopPropagation(); // Prevent card selection
+                openArticleUrl(e);
+              }}>
                 <ArrowUpRight className="h-4 w-4 mr-2" />
                 Visit Source
               </Button>
