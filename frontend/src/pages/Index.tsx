@@ -207,16 +207,7 @@ const Index = () => {
 
       {/* Main content */}
       <div className="flex flex-1 container px-0 sm:px-4">
-        {/* Filter button for mobile */}
-        <div className="lg:hidden fixed bottom-5 right-5 z-10">
-          <Button 
-            size="icon" 
-            className="rounded-full shadow-lg h-12 w-12"
-            onClick={() => setMobileSidebarOpen(true)}
-          >
-            <SlidersHorizontal />
-          </Button>
-        </div>
+        {/* Filter button for mobile - REMOVED since it conflicts with Generate Message FAB and is redundant with hamburger menu */}
         
         {/* Mobile sidebar */}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
