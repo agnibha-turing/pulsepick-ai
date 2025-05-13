@@ -27,7 +27,8 @@ import {
   User,
   Settings,
   SlidersHorizontal,
-  PlusCircle
+  PlusCircle,
+  MessageSquare
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -308,9 +309,16 @@ const Index = () => {
 
       {/* Selection hint */}
       {!loading && articles.length > 0 && selectedCount === 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 bg-primary text-primary-foreground rounded-full px-4 py-2 shadow-lg flex items-center gap-2 animate-pulse">
-          <PlusCircle className="h-4 w-4" />
-          <span className="text-sm font-medium">Select articles to generate a message</span>
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 
+          bg-primary/90 backdrop-blur-sm text-primary-foreground 
+          rounded-full px-5 py-2.5 shadow-lg flex items-center gap-2.5
+          animate-pulse max-w-[90%] sm:max-w-md border border-primary/20">
+          <div className="bg-primary-foreground/20 rounded-full p-1.5 flex-shrink-0">
+            <MessageSquare className="h-4 w-4" />
+          </div>
+          <span className="text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+            Select articles to create a message
+          </span>
         </div>
       )}
 
