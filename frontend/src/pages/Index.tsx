@@ -11,6 +11,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { PersonaInputCard, Persona } from "@/components/persona-input-card";
+import { usePersona } from "@/context/persona-context";
+import { useSelectedArticles } from "@/context/selected-articles-context";
+import { GenerateMessageFab } from "@/components/generate-message-fab";
+import { toast } from "sonner";
 import { 
   Share, 
   Filter, 
@@ -21,7 +26,9 @@ import {
   Home,
   User,
   Settings,
-  SlidersHorizontal
+  SlidersHorizontal,
+  PlusCircle,
+  MessageSquare
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -47,6 +54,8 @@ const Index = () => {
   const [contentTypes, setContentTypes] = useState<string[]>(["Articles"]);
   const [timePeriod, setTimePeriod] = useState("7 Days");
   const [minRelevance, setMinRelevance] = useState([50]);
+  const { activePersona, setActivePersona, isPersonaActive } = usePersona();
+  const { selectedArticles, selectedCount } = useSelectedArticles();
 
   useEffect(() => {
     const fetchArticles = async () => {
@@ -75,6 +84,13 @@ const Index = () => {
         ? prev.filter(t => t !== type)
         : [...prev, type]
     );
+  };
+
+  const handleGenerateMessage = () => {
+    toast.info(`Preparing to generate message with ${selectedArticles.length} selected articles`);
+    
+    console.log("Selected articles:", selectedArticles);
+    console.log("Active persona:", activePersona);
   };
 
   return (
@@ -192,16 +208,7 @@ const Index = () => {
 
       {/* Main content */}
       <div className="flex flex-1 container px-0 sm:px-4">
-        {/* Filter button for mobile */}
-        <div className="lg:hidden fixed bottom-5 right-5 z-10">
-          <Button 
-            size="icon" 
-            className="rounded-full shadow-lg h-12 w-12"
-            onClick={() => setMobileSidebarOpen(true)}
-          >
-            <SlidersHorizontal />
-          </Button>
-        </div>
+        {/* Filter button for mobile - REMOVED since it conflicts with Generate Message FAB and is redundant with hamburger menu */}
         
         {/* Mobile sidebar */}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -223,10 +230,19 @@ const Index = () => {
         {/* Main feed */}
         <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-bold">
-              {activeIndustry === "All" ? "All Industries" : activeIndustry}
-            </h1>
+            <div>
+              <h1 className="text-2xl font-bold">
+                {activeIndustry === "All" ? "All Industries" : activeIndustry}
+              </h1>
+              {isPersonaActive && activePersona?.recipientName && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  Content ranked for <span className="font-medium">{activePersona.recipientName}</span>
+                  {activePersona.jobTitle && ` (${activePersona.jobTitle})`}
+                </p>
+              )}
+            </div>
             <div className="flex gap-2">
+              <PersonaInputCard className="w-auto" />
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -242,6 +258,7 @@ const Index = () => {
               </Button>
             </div>
           </div>
+          
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(6)].map((_, i) => (
@@ -286,6 +303,24 @@ const Index = () => {
           )}
         </main>
       </div>
+
+      {/* Message generation FAB */}
+      <GenerateMessageFab />
+
+      {/* Selection hint */}
+      {!loading && articles.length > 0 && selectedCount === 0 && (
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 
+          bg-primary/90 backdrop-blur-sm text-primary-foreground 
+          rounded-full px-5 py-2.5 shadow-lg flex items-center gap-2.5
+          animate-pulse max-w-[90%] sm:max-w-md border border-primary/20">
+          <div className="bg-primary-foreground/20 rounded-full p-1.5 flex-shrink-0">
+            <MessageSquare className="h-4 w-4" />
+          </div>
+          <span className="text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+            Select articles to create a message
+          </span>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t py-6">
