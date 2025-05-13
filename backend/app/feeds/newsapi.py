@@ -116,7 +116,6 @@ class NewsAPIConnector(BaseConnector):
                         'author': article.get('author', ''),
                         'published_at': published_at,
                         'content': article.get('content', '') or article.get('description', ''),
-                        'image_url': article.get('urlToImage', ''),
                         'raw_json': article
                     }
 

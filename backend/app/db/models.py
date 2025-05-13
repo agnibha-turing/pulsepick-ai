@@ -45,7 +45,7 @@ class Article(Base):
     summary = Column(Text, nullable=True)
     content = Column(Text, nullable=True)
     raw_json = Column(JSON, nullable=True)
-    image_url = Column(String(2048), nullable=True)
+    keywords = Column(ARRAY(String), nullable=True)
 
     # Classification
     industry = Column(String(50), nullable=True)

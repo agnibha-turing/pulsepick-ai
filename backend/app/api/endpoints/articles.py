@@ -8,7 +8,7 @@ import random  # For generating demo images
 from app.db.models import Article, Industry
 from app.api.deps import get_db
 from app.pipeline.processor import ArticleProcessor
-from app.workers.tasks import fetch_all_articles
+from app.workers.tasks import fetch_all_articles, update_all_relevance_scores
 
 
 router = APIRouter()
@@ -18,48 +18,102 @@ router = APIRouter()
 def get_articles(
     db: Session = Depends(get_db),
     industry: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
     sort_by: str = Query(
         "published_at", regex="^(published_at|relevance_score)$"),
-    sort_order: str = Query("desc", regex="^(asc|desc)$")
+    sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    balanced: bool = Query(
+        True, description="Whether to balance articles across industries")
 ):
     """
     Get articles with optional filtering by industry
     """
-    query = db.query(Article)
+    # If specific industry is requested, use original logic
+    if industry:
+        query = db.query(Article)
 
-    # Apply industry filter if provided
-    if industry and industry.lower() in [i.value for i in Industry]:
-        query = query.filter(Article.industry == industry.lower())
+        # Apply industry filter if provided
+        if industry.lower() in [i.value for i in Industry]:
+            query = query.filter(Article.industry == industry.lower())
 
-    # Apply sorting
-    if sort_order == "desc":
-        query = query.order_by(desc(getattr(Article, sort_by)))
+        # Apply sorting
+        if sort_order == "desc":
+            query = query.order_by(desc(getattr(Article, sort_by)))
+        else:
+            query = query.order_by(getattr(Article, sort_by))
+
+        # Apply pagination
+        total_count = query.count()
+        articles = query.offset(offset).limit(limit).all()
+
+    # For balanced distribution across industries
+    elif balanced:
+        # Define all industries
+        industries = [i.value for i in Industry]
+
+        # Calculate articles per industry (ensure at least 1 per industry)
+        articles_per_industry = max(limit // len(industries), 1)
+
+        # Collect articles from each industry
+        articles = []
+
+        for ind in industries:
+            industry_query = db.query(Article).filter(Article.industry == ind)
+
+            # Apply sorting
+            if sort_order == "desc":
+                industry_query = industry_query.order_by(
+                    desc(getattr(Article, sort_by)))
+            else:
+                industry_query = industry_query.order_by(
+                    getattr(Article, sort_by))
+
+            # Get exactly the requested number of articles for this industry
+            industry_articles = industry_query.limit(
+                articles_per_industry).all()
+            articles.extend(industry_articles)
+
+        # If we couldn't get enough articles from some industries, add from others to fill the limit
+        if len(articles) < limit:
+            # Calculate how many more we need
+            remaining = limit - len(articles)
+
+            # Get article IDs we already have
+            existing_ids = [a.id for a in articles]
+
+            # Query for additional articles from any industry
+            additional_query = db.query(Article).filter(
+                Article.id.notin_(existing_ids))
+
+            # Apply sorting
+            if sort_order == "desc":
+                additional_query = additional_query.order_by(
+                    desc(getattr(Article, sort_by)))
+            else:
+                additional_query = additional_query.order_by(
+                    getattr(Article, sort_by))
+
+            # Get remaining articles
+            additional_articles = additional_query.limit(remaining).all()
+            articles.extend(additional_articles)
+
+    # Unbalanced mode - just get articles based on sorting
     else:
-        query = query.order_by(getattr(Article, sort_by))
+        query = db.query(Article)
 
-    # Apply pagination
-    total_count = query.count()
-    articles = query.offset(offset).limit(limit).all()
+        # Apply sorting
+        if sort_order == "desc":
+            query = query.order_by(desc(getattr(Article, sort_by)))
+        else:
+            query = query.order_by(getattr(Article, sort_by))
+
+        # Apply pagination
+        articles = query.offset(offset).limit(limit).all()
 
     # Convert to dictionary to add metadata
     result = []
     for article in articles:
-        # Generate placeholder image if none exists
-        image_url = article.image_url
-        if not image_url:
-            # Generate industry-specific placeholder images
-            industry_placeholders = {
-                Industry.BFSI: "https://source.unsplash.com/random/300x200/?finance,banking",
-                Industry.RETAIL: "https://source.unsplash.com/random/300x200/?retail,shopping",
-                Industry.HEALTHCARE: "https://source.unsplash.com/random/300x200/?healthcare,medical",
-                Industry.TECHNOLOGY: "https://source.unsplash.com/random/300x200/?technology,ai",
-                Industry.OTHER: "https://source.unsplash.com/random/300x200/?business"
-            }
-            image_url = industry_placeholders.get(
-                article.industry, industry_placeholders[Industry.OTHER])
-
         article_dict = {
             "id": article.id,
             "title": article.title,
@@ -69,7 +123,7 @@ def get_articles(
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
-            "image_url": image_url,
+            "keywords": article.keywords if article.keywords else ["AI", "Technology", "News"],
             "source": {
                 "id": article.source.id,
                 "name": article.source.name,
@@ -126,7 +180,7 @@ def search_articles(
             "summary": article.summary,
             "industry": article.industry,
             "relevance_score": article.relevance_score,
-            "image_url": article.image_url,
+            "keywords": article.keywords if article.keywords else ["AI", "Technology", "News"],
             "similarity_score": round(float(similarity), 4),
             "source": {
                 "id": article.source.id,
@@ -149,5 +203,19 @@ def trigger_fetch():
 
     return {
         "message": "Article fetching triggered successfully",
+        "task_id": task.id
+    }
+
+
+@router.post("/update-scores", response_model=dict)
+def trigger_update_scores():
+    """
+    Manually trigger the update of all article relevance scores
+    """
+    # Call the Celery task asynchronously
+    task = update_all_relevance_scores.delay()
+
+    return {
+        "message": "Relevance score update triggered successfully",
         "task_id": task.id
     }

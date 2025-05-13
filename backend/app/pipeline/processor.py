@@ -1,13 +1,18 @@
 import openai
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 import math
 import json
 import re
+from sqlalchemy import func
+import logging
 
 from app.db.models import Article, Industry
 from app.core.config import settings
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 class ArticleProcessor:
@@ -34,15 +39,40 @@ class ArticleProcessor:
             List of Article objects that were successfully processed and saved
         """
         processed_articles = []
+        # Track URLs we've seen in this batch to avoid duplicates within the batch
+        processed_urls = set()
 
         for article_data in articles:
-            # Check if article with this URL already exists (deduplication)
-            existing = self.db.query(Article).filter(
-                Article.url == article_data['url']).first()
-            if existing:
-                continue
-
             try:
+                # Normalize URL for comparison (lowercase, remove trailing slashes)
+                original_url = article_data['url']
+                normalized_url = original_url.lower().rstrip('/')
+
+                # Skip if we've already processed this URL in the current batch
+                if normalized_url in processed_urls:
+                    logger.info(
+                        f"Skipping duplicate URL in batch: {original_url}")
+                    continue
+
+                # Check if article with this URL already exists in database (deduplication)
+                # Use SQL LIKE with pattern to handle trailing slashes
+                url_pattern = original_url.rstrip('/') + '%'
+                existing = self.db.query(Article).filter(
+                    func.lower(Article.url).like(func.lower(url_pattern))).first()
+
+                if not existing:
+                    # Double check with exact match as fallback
+                    existing = self.db.query(Article).filter(
+                        Article.url == original_url).first()
+
+                if existing:
+                    logger.info(
+                        f"Skipping existing article in database: {original_url}")
+                    continue
+
+                # Add to our processed URLs set
+                processed_urls.add(normalized_url)
+
                 # Create new article
                 article = Article(**article_data)
 
@@ -64,6 +94,10 @@ class ArticleProcessor:
                 article.industry = self._classify_industry(
                     article.title, article.content or "", article.summary or "")
 
+                # Extract keywords
+                article.keywords = self._extract_keywords(
+                    article.title, article.content or "", article.summary or "")
+
                 # Generate embeddings for vector search
                 article.embedding = self._generate_embedding(
                     f"{article.title}. {article.summary or article.content or ''}"
@@ -73,16 +107,30 @@ class ArticleProcessor:
                 article.relevance_score = self._calculate_relevance_score(
                     article)
 
-                # Save to database
-                self.db.add(article)
-                self.db.commit()
-                self.db.refresh(article)
-
-                processed_articles.append(article)
+                # Save to database with explicit try/except for DB constraints
+                try:
+                    self.db.add(article)
+                    self.db.commit()
+                    self.db.refresh(article)
+                    processed_articles.append(article)
+                    logger.info(
+                        f"Successfully saved article: {article.title[:50]}")
+                except Exception as db_error:
+                    self.db.rollback()
+                    # If it's a duplicate constraint, log as info not warning
+                    if "unique_article_url" in str(db_error):
+                        logger.info(
+                            f"Duplicate URL detected: {article.url}")
+                    else:
+                        # For other database errors, log as warning
+                        logger.warning(
+                            f"Database error saving article '{article.title[:50]}': {db_error}")
+                        # Re-raise non-duplicate errors
+                        raise
 
             except Exception as e:
                 # Log error but continue with other articles
-                print(
+                logger.warning(
                     f"Error processing article '{article_data.get('title', '')}': {e}")
                 self.db.rollback()
                 continue
@@ -108,7 +156,7 @@ class ArticleProcessor:
             return summary
 
         except Exception as e:
-            print(f"Error generating summary: {e}")
+            logger.error(f"Error generating summary: {e}")
             # Fallback to simple summary if OpenAI fails
             return content[:max_length] + "..." if len(content) > max_length else content
 
@@ -151,7 +199,7 @@ class ArticleProcessor:
             return industry_mapping.get(industry, Industry.OTHER)
 
         except Exception as e:
-            print(f"Error classifying industry: {e}")
+            logger.error(f"Error classifying industry: {e}")
             return Industry.OTHER
 
     def _generate_embedding(self, text: str) -> List[float]:
@@ -166,45 +214,34 @@ class ArticleProcessor:
             return response.data[0].embedding
 
         except Exception as e:
-            print(f"Error generating embedding: {e}")
+            logger.error(f"Error generating embedding: {e}")
             # Return zero vector as fallback
             return [0.0] * settings.OPENAI_EMBEDDING_DIMENSIONS
 
     def _calculate_relevance_score(self, article: Article) -> float:
         """
-        Calculate a relevance score for the article based on multiple factors:
-        1. Recency - newer articles get higher scores
-        2. Industry weighting - prioritize underrepresented industries
+        Calculate a relevance score for the article based solely on recency.
 
-        Formula: score = recency_score * industry_weight
+        Formula: score = recency_score
         - A fresh article (0 days) has recency_score 1.0
         - A 1-day old article has recency_score ~0.6
         - A 3-day old article has recency_score ~0.22
-
-        Industry weights increase relevance for BFSI, Retail, and Other categories
         """
-        # Base recency score (same as before)
+        # Base recency score
         recency_score = 0.0
         if article.published_at:
-            days_old = (datetime.utcnow() - article.published_at).days
+            # Ensure both dates are timezone-aware for comparison
+            now = datetime.now(timezone.utc)
+            pub_date = article.published_at
+            if pub_date.tzinfo is None:
+                pub_date = pub_date.replace(tzinfo=timezone.utc)
+
+            days_old = (now - pub_date).days
             decay_factor = 0.5  # Controls how quickly relevance decays with age
             recency_score = math.exp(-decay_factor * max(0, days_old))
 
-        # Industry weighting to prioritize underrepresented industries
-        industry_weights = {
-            Industry.BFSI: 2.0,       # Highest priority - strongly boost BFSI
-            Industry.RETAIL: 1.8,     # High priority - boost retail articles
-            Industry.OTHER: 1.5,       # Medium priority
-            Industry.HEALTHCARE: 1.2,  # Slight boost
-            # No change for tech (already well-represented)
-            Industry.TECHNOLOGY: 1.0
-        }
-
-        # Get industry weight (default to 1.0 if industry is not set)
-        industry_weight = industry_weights.get(article.industry, 1.0)
-
-        # Combine scores for final relevance
-        return recency_score * industry_weight
+        # Return just the recency score without industry weighting
+        return recency_score
 
     def _enrich_metadata(self, title: str, content: str, url: str, raw_json: dict) -> Tuple[Optional[str], Optional[datetime]]:
         """
@@ -250,12 +287,18 @@ class ArticleProcessor:
                                 '%Y-%m-%d',  # Simple date
                             ]:
                                 try:
-                                    date = datetime.strptime(date_str, fmt)
+                                    parsed_date = datetime.strptime(
+                                        date_str, fmt)
+                                    # Add timezone info if missing
+                                    if parsed_date.tzinfo is None:
+                                        parsed_date = parsed_date.replace(
+                                            tzinfo=timezone.utc)
+                                    date = parsed_date
                                     break
                                 except ValueError:
                                     continue
                     except Exception as e:
-                        print(f"Error parsing date: {e}")
+                        logger.warning(f"Error parsing date: {e}")
 
                     if date:  # If we successfully parsed a date, break
                         break
@@ -272,7 +315,7 @@ class ArticleProcessor:
                     if not date and extracted_date:
                         date = extracted_date
                 except Exception as e:
-                    print(f"Error extracting metadata with AI: {e}")
+                    logger.error(f"Error extracting metadata with AI: {e}")
 
         return author, date
 
@@ -315,12 +358,78 @@ Return your answer in JSON format with these fields:
             date = None
             if date_str and date_str != "null":
                 try:
-                    date = datetime.strptime(date_str, "%Y-%m-%d")
+                    # Parse the date and ensure it's timezone-aware (UTC)
+                    date = datetime.strptime(
+                        date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 except ValueError:
-                    print(f"Could not parse date: {date_str}")
+                    logger.warning(f"Could not parse date: {date_str}")
 
             return author, date
 
         except Exception as e:
-            print(f"Error using OpenAI to extract metadata: {e}")
+            logger.error(f"Error using OpenAI to extract metadata: {e}")
             return None, None
+
+    def _extract_keywords(self, title: str, content: str, summary: str) -> List[str]:
+        """Extract 3 relevant keywords from the article using OpenAI"""
+        try:
+            # Combine title and summary for keyword extraction
+            text = f"Title: {title}\nSummary: {summary}\nExcerpt: {content[:500]}..."
+
+            # More explicit prompt with instructions for concise keywords
+            prompt = f"""Extract exactly 3 most relevant keywords from this article.
+Return ONLY the 3 keywords separated by commas, without numbering, explanation, or additional text.
+
+IMPORTANT: Use common acronyms and shorter forms when appropriate:
+- Use "AI" instead of "Artificial Intelligence"
+- Use "ML" instead of "Machine Learning"
+- Use "NLP" instead of "Natural Language Processing"
+- Use "UI/UX" instead of "User Interface/User Experience"
+- Keep keywords brief and concise
+
+Example: "AI, Fraud Detection, Banking" instead of "Artificial Intelligence, Fraud Detection Systems, Banking Industry"
+
+Article:
+{text}"""
+
+            # Add more detailed logging
+            logger.debug(
+                f"Sending keyword extraction prompt for: {title[:30]}...")
+
+            response = self.openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a keyword extraction tool. Output ONLY concise keywords separated by commas. Use acronyms when possible."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50,
+                temperature=0.3  # Lower temperature for more deterministic response
+            )
+
+            keywords_text = response.choices[0].message.content.strip()
+            logger.debug(f"Raw keyword response: {keywords_text}")
+
+            # More robust parsing
+            # First, try comma separation
+            keywords = [k.strip() for k in keywords_text.split(',')]
+
+            # If we don't have enough keywords, try other separators
+            if len(keywords) < 3:
+                keywords = [k.strip() for k in keywords_text.split('\n')]
+
+            # Clean up any empty strings
+            keywords = [k for k in keywords if k]
+
+            # Ensure we have exactly 3 keywords
+            if len(keywords) > 3:
+                keywords = keywords[:3]
+            while len(keywords) < 3:
+                keywords.append(f"Topic {len(keywords)+1}")  # Better fallback
+
+            logger.debug(f"Extracted keywords: {keywords}")
+            return keywords
+
+        except Exception as e:
+            logger.error(f"Error extracting keywords: {e}")
+            # Return default keywords on failure
+            return ["AI", "Technology", "News"]

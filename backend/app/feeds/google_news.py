@@ -1,9 +1,10 @@
 import feedparser
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 import urllib.parse
 from time import mktime
 from sqlalchemy.orm import Session
+import re
 
 from app.feeds.base import BaseConnector
 from app.db.models import SourceType
@@ -38,9 +39,27 @@ class GoogleNewsConnector(BaseConnector):
     def _parse_datetime(self, date_str: str) -> Optional[datetime]:
         """Parse the datetime from RSS feed entry"""
         try:
-            return datetime.fromtimestamp(mktime(feedparser.parsedate(date_str)))
-        except:
-            return None
+            # Use email.utils for robust RFC 2822 parsing if available
+            from email.utils import parsedate_to_datetime
+
+            dt = parsedate_to_datetime(date_str)
+            # Ensure timezone-aware (Google News dates are usually GMT)
+            if dt and dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            try:
+                # Fallback to feedparser + mktime then assume UTC
+                ts = mktime(feedparser.parsedate(date_str))
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            except Exception:
+                return None
+
+    def _extract_author(self, entry: Dict[str, Any]) -> Optional[str]:
+        """Extract author from entry if available"""
+        if 'author' in entry:
+            return entry['author']
+        return None
 
     def fetch_articles(self, since: Optional[datetime] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """Fetch articles from Google News based on configured topics"""
@@ -53,14 +72,14 @@ class GoogleNewsConnector(BaseConnector):
             print(
                 f"[DEBUG] Google News looking for all available articles (no date filter)")
 
-        for topic in self.topics:
-            # Create or get source for this topic
-            source = self.get_or_create_source(
-                name=f"Google News - {topic}",
-                url=self._build_url(topic),
-                description=f"Google News feed for topic: {topic}"
-            )
+        # Create a single Google News source for all topics
+        source = self.get_or_create_source(
+            name="Google News",
+            url="https://news.google.com/",
+            description="Google News feed for various topics"
+        )
 
+        for topic in self.topics:
             # Fetch the RSS feed
             feed_url = self._build_url(topic)
             print(
@@ -80,16 +99,23 @@ class GoogleNewsConnector(BaseConnector):
             for entry in feed.entries[:limit]:
                 published_at = self._parse_datetime(entry.get('published'))
 
+                # Ensure timezone-aware for safe comparison later
+                if published_at and published_at.tzinfo is None:
+                    published_at = published_at.replace(tzinfo=timezone.utc)
+
                 # Skip if older than 'since' parameter
                 if since and published_at and published_at < since:
                     continue
+
+                # Extract more metadata
+                author = self._extract_author(entry)
 
                 # Extract data
                 article = {
                     'source_id': source.id,
                     'title': entry.get('title', ''),
                     'url': entry.get('link', ''),
-                    'author': entry.get('author', ''),
+                    'author': author,
                     'published_at': published_at,
                     'content': entry.get('summary', ''),
                     'raw_json': dict(entry)
