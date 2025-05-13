@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { DisplayArticle } from "@/services/article-service";
 import { Share, BookmarkPlus, Linkedin, Twitter, Mail, MessageSquare, ArrowUpRight, ChevronDown, CheckSquare, Square } from "lucide-react";
 import { useSelectedArticles } from "@/context/selected-articles-context";
+import { MessageDialog } from "@/components/message-dialog";
 import { 
   Dialog,
   DialogContent,
@@ -374,114 +375,13 @@ export function ArticleCard({ article }: ArticleCardProps) {
         </DialogContent>
       </Dialog>
       
-      {/* Share Dialog */}
-      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Share Content</DialogTitle>
-            <DialogDescription>
-              Choose a platform and customize your message
-            </DialogDescription>
-          </DialogHeader>
-          
-          <Tabs defaultValue="linkedin" className="mt-2">
-            <TabsList className="grid grid-cols-4 mb-4">
-              <TabsTrigger value="linkedin" className="flex items-center gap-2">
-                <Linkedin className="h-4 w-4" />
-                <span className="hidden sm:inline">LinkedIn</span>
-              </TabsTrigger>
-              <TabsTrigger value="twitter" className="flex items-center gap-2">
-                <Twitter className="h-4 w-4" />
-                <span className="hidden sm:inline">Twitter</span>
-              </TabsTrigger>
-              <TabsTrigger value="email" className="flex items-center gap-2">
-                <Mail className="h-4 w-4" />
-                <span className="hidden sm:inline">Email</span>
-              </TabsTrigger>
-              <TabsTrigger value="slack" className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                <span className="hidden sm:inline">Slack</span>
-              </TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="linkedin" className="space-y-4">
-              <Textarea 
-                value={linkedinMessage} 
-                onChange={(e) => setLinkedinMessage(e.target.value)}
-                className="min-h-[100px]"
-              />
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("linkedin")}>Regenerate</Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => {
-                    navigator.clipboard.writeText(linkedinMessage);
-                    toast.success("Caption copied to clipboard");
-                  }}>Copy</Button>
-                  <Button onClick={() => handleShare("LinkedIn")}>Post</Button>
-                </div>
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="twitter" className="space-y-4">
-              <Textarea 
-                value={twitterMessage} 
-                onChange={(e) => setTwitterMessage(e.target.value)}
-                className="min-h-[100px]"
-              />
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("twitter")}>Regenerate</Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => {
-                    navigator.clipboard.writeText(twitterMessage);
-                    toast.success("Caption copied to clipboard");
-                  }}>Copy</Button>
-                  <Button onClick={() => handleShare("Twitter")}>Post</Button>
-                </div>
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="email" className="space-y-4">
-              <Textarea 
-                value={emailMessage} 
-                onChange={(e) => setEmailMessage(e.target.value)}
-                className="min-h-[100px]"
-              />
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("email")}>Regenerate</Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => {
-                    navigator.clipboard.writeText(emailMessage);
-                    toast.success("Caption copied to clipboard");
-                  }}>Copy</Button>
-                  <Button onClick={() => handleShare("Email")}>Send</Button>
-                </div>
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="slack" className="space-y-4">
-              <Textarea 
-                value={slackMessage} 
-                onChange={(e) => setSlackMessage(e.target.value)}
-                className="min-h-[100px]"
-              />
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("slack")}>Regenerate</Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => {
-                    navigator.clipboard.writeText(slackMessage);
-                    toast.success("Caption copied to clipboard");
-                  }}>Copy</Button>
-                  <Button onClick={() => handleShare("Slack")}>Send</Button>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-          
-          <p className="text-xs text-muted-foreground text-center mt-4">
-            Activity will be archived for compliance
-          </p>
-        </DialogContent>
-      </Dialog>
+      {/* Share Dialog using MessageDialog component */}
+      <MessageDialog 
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        articles={[article]}
+        mode="share"
+      />
     </>
   );
 }

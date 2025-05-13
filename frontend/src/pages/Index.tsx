@@ -313,7 +313,7 @@ const Index = () => {
       </div>
 
       {/* Message generation FAB */}
-      <GenerateMessageFab onGenerateClick={handleGenerateMessage} />
+      <GenerateMessageFab />
 
       {/* Selection hint */}
       {!loading && articles.length > 0 && selectedCount === 0 && (
