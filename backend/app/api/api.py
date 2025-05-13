@@ -1,7 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.endpoints import articles
+from app.api.endpoints import articles, messages
 
 api_router = APIRouter()
 api_router.include_router(
     articles.router, prefix="/articles", tags=["articles"])
+api_router.include_router(
+    messages.router, prefix="/messages", tags=["messages"])

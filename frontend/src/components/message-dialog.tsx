@@ -18,10 +18,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { DisplayArticle } from "@/services/article-service";
 import { Persona } from "@/components/persona-input-card";
-import { Linkedin, Twitter, Mail, MessageSquare, RefreshCw, ScrollText } from "lucide-react";
+import { Linkedin, Twitter, Mail, MessageSquare, RefreshCw, ScrollText, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { generateMessage } from "@/services/message-service";
 
 interface MessageDialogProps {
   open: boolean;
@@ -40,20 +41,58 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
   const [emailMessage, setEmailMessage] = useState("");
   const [slackMessage, setSlackMessage] = useState("");
   
+  // Loading states for each platform
+  const [isLoading, setIsLoading] = useState({
+    linkedin: false,
+    twitter: false,
+    email: false,
+    slack: false
+  });
+  
   // Generate initial messages when dialog opens or articles/persona change
   useEffect(() => {
     if (open) {
-      if (isSingleArticle) {
-        // Single article sharing
-        generateShareMessages(article);
-      } else {
-        // Multiple article message generation
-        generateMultiArticleMessages(articles, persona);
-      }
+      generateAllMessages();
     }
   }, [open, articles, persona, mode]);
   
-  // Generate share messages for a single article
+  // Function to generate messages for all platforms
+  const generateAllMessages = async () => {
+    setIsLoading({
+      linkedin: true,
+      twitter: true,
+      email: true,
+      slack: true
+    });
+    
+    try {
+      // Generate messages for all platforms in parallel
+      const [emailMsg, linkedinMsg, twitterMsg, slackMsg] = await Promise.all([
+        generateMessage({ articles, persona, platform: "email" }),
+        generateMessage({ articles, persona, platform: "linkedin" }),
+        generateMessage({ articles, persona, platform: "twitter" }),
+        generateMessage({ articles, persona, platform: "slack" })
+      ]);
+      
+      setEmailMessage(emailMsg);
+      setLinkedinMessage(linkedinMsg);
+      setTwitterMessage(twitterMsg);
+      setSlackMessage(slackMsg);
+    } catch (error) {
+      console.error("Error generating initial messages:", error);
+      // If API fails, use client-side fallback generators
+      generateShareMessages(article);
+    } finally {
+      setIsLoading({
+        linkedin: false,
+        twitter: false,
+        email: false,
+        slack: false
+      });
+    }
+  };
+  
+  // Legacy client-side fallback generator
   const generateShareMessages = (article: DisplayArticle) => {
     const messages = {
       linkedin: `I found this valuable insight on ${article.title} that might interest my network. #PulsePick #ProfessionalInsights ${article.categories.map(c => `#${c.replace(/\s+/g, '')}`).join(' ')}`,
@@ -68,175 +107,46 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
     setSlackMessage(messages.slack);
   };
   
-  // Generate personalized multi-article messages for each platform
-  const generateMultiArticleMessages = (articles: DisplayArticle[], persona?: Persona | null) => {
-    // LinkedIn message - Professional, concise with hashtags
-    let linkedinMsg = `I wanted to share some key industry insights that might be valuable${persona?.recipientName ? ' for professionals like ' + persona.recipientName : ''}:\n\n`;
-    articles.forEach((article, i) => {
-      if (i < 3) { // Only include first 3 articles explicitly for LinkedIn
-        linkedinMsg += `• "${article.title}"\n`;
-      }
-    });
-    if (articles.length > 3) {
-      linkedinMsg += `...and ${articles.length - 3} more insights\n\n`;
-    }
-    linkedinMsg += `#ProfessionalInsights #PulsePick`;
-    if (articles[0]?.categories?.[0]) {
-      linkedinMsg += ` #${articles[0].categories[0].replace(/\s+/g, '')}`;
-    }
+  // Regenerate messages with API
+  const handleRegenerateCaption = async (platform: string) => {
+    // Set loading state for the specific platform
+    setIsLoading(prev => ({ ...prev, [platform]: true }));
     
-    // Twitter/X message - Very concise
-    let twitterMsg = `Check out these top insights I've curated`;
-    if (persona?.recipientName) {
-      twitterMsg += ` for ${persona.recipientName}`;
-    }
-    twitterMsg += `:\n\n`;
-    articles.forEach((article, i) => {
-      if (i < 2) { // Only include first 2 articles for Twitter due to character limit
-        twitterMsg += `${i+1}. ${article.title.substring(0, 60)}${article.title.length > 60 ? '...' : ''}\n`;
-      }
-    });
-    if (articles.length > 2) {
-      twitterMsg += `...and ${articles.length - 2} more\n`;
-    }
-    twitterMsg += `\n#PulsePick`;
-    
-    // Email message - More comprehensive and formal
-    let emailMsg = `Subject: Curated Industry Insights${persona?.recipientName ? ' for ' + persona.recipientName : ''}\n\n`;
-    emailMsg += `Hi${persona?.recipientName ? ' ' + persona.recipientName : ''},\n\n`;
-    emailMsg += `I thought you might find these recent insights valuable${persona?.jobTitle ? ' for your role as ' + persona.jobTitle : ''}:\n\n`;
-    
-    articles.forEach((article, index) => {
-      emailMsg += `${index + 1}. "${article.title}"\n`;
-      emailMsg += `   ${article.summary[0].substring(0, 100)}...\n\n`;
-    });
-    
-    if (persona?.conversationContext) {
-      emailMsg += `This reminded me of our conversation about ${persona.conversationContext}.\n\n`;
-    }
-    
-    // Adjust tone based on personality traits
-    if (persona?.personalityTraits) {
-      const hasHumor = persona.personalityTraits.toLowerCase().includes('humor');
-      const isSerious = persona.personalityTraits.toLowerCase().includes('serious');
+    try {
+      // Call the API with regenerate flag
+      const message = await generateMessage({
+        articles,
+        persona,
+        platform: platform as "email" | "linkedin" | "twitter" | "slack",
+        regenerate: true
+      });
       
-      if (hasHumor) {
-        emailMsg += "Hope these provide some useful food for thought – and perhaps even a bit of intellectual entertainment!\n\n";
-      } else if (isSerious) {
-        emailMsg += "I believe these insights might provide valuable perspectives for your consideration.\n\n";
-      } else {
-        emailMsg += "I'd be interested to hear your thoughts on these when you have a moment.\n\n";
-      }
-    } else {
-      emailMsg += "I'd be interested to hear your thoughts on these when you have a moment.\n\n";
-    }
-    
-    emailMsg += "Best regards,";
-    
-    // Slack message - More casual, formatted for Slack
-    let slackMsg = `*Curated insights${persona?.recipientName ? ' for ' + persona.recipientName : ''}:*\n\n`;
-    
-    articles.forEach((article, index) => {
-      slackMsg += `*${index + 1}. ${article.title}*\n`;
-      slackMsg += `>${article.summary[0].substring(0, 100)}...\n\n`;
-    });
-    
-    if (persona?.conversationContext) {
-      slackMsg += `_Related to our discussion about ${persona.conversationContext}_\n\n`;
-    }
-    
-    slackMsg += `Let me know what you think! 👍`;
-    
-    setLinkedinMessage(linkedinMsg);
-    setTwitterMessage(twitterMsg);
-    setEmailMessage(emailMsg);
-    setSlackMessage(slackMsg);
-  };
-  
-  // Regenerate messages
-  const handleRegenerateCaption = (platform: string) => {
-    if (isSingleArticle) {
-      const messages = {
-        linkedin: `I wanted to share this valuable industry insight from PulsePick: "${article.title}". This could impact our strategy in the ${article.categories[0]} sector. #ThoughtLeadership #${article.categories[0].replace(/\s+/g, '')} #IndustryInsights`,
-        twitter: `Key finding: ${article.summary[0].substring(0, 100)}... (via @PulsePick) #${article.categories[0].replace(/\s+/g, '')}`,
-        email: `Subject: Strategic insight to consider\n\nHi${persona?.recipientName ? ' ' + persona.recipientName : ''},\n\nThis recent analysis could be valuable for our upcoming planning:\n\n"${article.title}"\n\nKey points:\n- ${article.summary[0]}\n\nLet's discuss this at our next meeting.\n\nBest,`,
-        slack: `*Strategic insight alert* 📊\n"${article.title}"\n>${article.summary[0]}\nSource: ${article.source}`
-      };
-
+      // Update the appropriate message state
       switch(platform) {
         case "linkedin":
-          setLinkedinMessage(messages.linkedin);
+          setLinkedinMessage(message);
           break;
         case "twitter":
-          setTwitterMessage(messages.twitter);
+          setTwitterMessage(message);
           break;
         case "email":
-          setEmailMessage(messages.email);
+          setEmailMessage(message);
           break;
         case "slack":
-          setSlackMessage(messages.slack);
+          setSlackMessage(message);
           break;
       }
-    } else {
-      // Regenerate multi-article messages with slight variations
-      let linkedinMsg = `I've curated some valuable industry insights that might interest my network${persona?.recipientName ? ', especially for professionals like ' + persona.recipientName : ''}.\n\n`;
-      articles.forEach((article, i) => {
-        if (i < 3) {
-          linkedinMsg += `• ${article.title}\n`;
-        }
+      
+      toast.success("Message regenerated", {
+        description: "New AI-powered message created",
       });
-      if (articles.length > 3) {
-        linkedinMsg += `...plus ${articles.length - 3} more key findings\n\n`;
-      }
-      linkedinMsg += `#MarketInsights #PulsePick`;
-      
-      let twitterMsg = `Just compiled these essential insights${persona?.recipientName ? ' for ' + persona.recipientName : ''}:\n\n`;
-      articles.forEach((article, i) => {
-        if (i < 2) {
-          twitterMsg += `${i+1}. "${article.title.substring(0, 50)}${article.title.length > 50 ? '...' : ''}"\n`;
-        }
-      });
-      if (articles.length > 2) {
-        twitterMsg += `...and more via @PulsePick\n`;
-      }
-      
-      let emailMsg = `Subject: Important Industry Updates${persona?.recipientName ? ' for ' + persona.recipientName : ''}\n\n`;
-      emailMsg += `Hi${persona?.recipientName ? ' ' + persona.recipientName : ''},\n\n`;
-      emailMsg += `I've compiled these recent developments that could be valuable for ${persona?.jobTitle ? 'your work as ' + persona.jobTitle : 'your strategic planning'}:\n\n`;
-      
-      articles.forEach((article, index) => {
-        emailMsg += `${index + 1}. "${article.title}"\n`;
-        emailMsg += `   Summary: ${article.summary[0].substring(0, 120)}...\n\n`;
-      });
-      
-      if (persona?.conversationContext) {
-        emailMsg += `This builds on our previous discussion about ${persona.conversationContext}.\n\n`;
-      }
-      
-      emailMsg += persona?.personalityTraits?.toLowerCase().includes('serious') 
-        ? "These insights merit careful consideration for their strategic implications.\n\n" 
-        : "Would love to discuss these findings when you have time.\n\n";
-      
-      emailMsg += "Regards,";
-      
-      let slackMsg = `*Strategic insights compilation* 📊\n\n`;
-      
-      articles.forEach((article, index) => {
-        slackMsg += `*${index + 1}. ${article.title}*\n`;
-        slackMsg += `>${article.summary[0].substring(0, 80)}...\n\n`;
-      });
-      
-      slackMsg += `Thoughts? 🤔`;
-      
-      setLinkedinMessage(linkedinMsg);
-      setTwitterMessage(twitterMsg);
-      setEmailMessage(emailMsg);
-      setSlackMessage(slackMsg);
+    } catch (error) {
+      console.error(`Error regenerating ${platform} message:`, error);
+      toast.error(`Failed to regenerate message for ${platform}`);
+    } finally {
+      // Clear loading state
+      setIsLoading(prev => ({ ...prev, [platform]: false }));
     }
-    
-    toast.success("Message regenerated", {
-      description: "New AI-powered message created",
-    });
   };
   
   // Handle sharing
@@ -255,7 +165,7 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[650px]">
         <DialogHeader>
           <DialogTitle>
             Generate Personalized Message
@@ -269,7 +179,7 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
           {/* Selected articles summary - always shown */}
           <div className="border rounded-md p-3 bg-muted/20">
             <h3 className="text-sm font-medium mb-2">Selected Articles</h3>
-            <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2">
+            <div className="space-y-2 h-[100px] overflow-y-auto pr-2">
               {articles.map((article) => (
                 <div key={article.id} className="flex items-start gap-2 text-sm">
                   <span className="text-muted-foreground mt-0.5">•</span>
@@ -327,14 +237,22 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
             </TabsList>
             
             <TabsContent value="email" className="space-y-4">
-              <Textarea 
-                value={emailMessage} 
-                onChange={(e) => setEmailMessage(e.target.value)}
-                className="min-h-[200px] h-[200px] font-mono text-sm overflow-y-auto"
-              />
+              <div className="relative">
+                <Textarea 
+                  value={emailMessage} 
+                  onChange={(e) => setEmailMessage(e.target.value)}
+                  className="min-h-[200px] h-[200px] font-mono text-sm"
+                />
+                {isLoading.email && (
+                  <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm text-muted-foreground mt-2">Generating email message...</p>
+                  </div>
+                )}
+              </div>
               <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("email")}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                <Button variant="outline" onClick={() => handleRegenerateCaption("email")} disabled={isLoading.email}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.email ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
                 <div className="space-x-2">
@@ -348,14 +266,22 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
             </TabsContent>
             
             <TabsContent value="linkedin" className="space-y-4">
-              <Textarea 
-                value={linkedinMessage} 
-                onChange={(e) => setLinkedinMessage(e.target.value)}
-                className="min-h-[200px] h-[200px] font-mono text-sm overflow-y-auto"
-              />
+              <div className="relative">
+                <Textarea 
+                  value={linkedinMessage} 
+                  onChange={(e) => setLinkedinMessage(e.target.value)}
+                  className="min-h-[200px] h-[200px] font-mono text-sm"
+                />
+                {isLoading.linkedin && (
+                  <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm text-muted-foreground mt-2">Generating LinkedIn post...</p>
+                  </div>
+                )}
+              </div>
               <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("linkedin")}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                <Button variant="outline" onClick={() => handleRegenerateCaption("linkedin")} disabled={isLoading.linkedin}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.linkedin ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
                 <div className="space-x-2">
@@ -369,14 +295,22 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
             </TabsContent>
             
             <TabsContent value="twitter" className="space-y-4">
-              <Textarea 
-                value={twitterMessage} 
-                onChange={(e) => setTwitterMessage(e.target.value)}
-                className="min-h-[200px] h-[200px] font-mono text-sm overflow-y-auto"
-              />
+              <div className="relative">
+                <Textarea 
+                  value={twitterMessage} 
+                  onChange={(e) => setTwitterMessage(e.target.value)}
+                  className="min-h-[200px] h-[200px] font-mono text-sm"
+                />
+                {isLoading.twitter && (
+                  <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm text-muted-foreground mt-2">Generating Twitter post...</p>
+                  </div>
+                )}
+              </div>
               <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("twitter")}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                <Button variant="outline" onClick={() => handleRegenerateCaption("twitter")} disabled={isLoading.twitter}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.twitter ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
                 <div className="space-x-2">
@@ -390,14 +324,22 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
             </TabsContent>
             
             <TabsContent value="slack" className="space-y-4">
-              <Textarea 
-                value={slackMessage} 
-                onChange={(e) => setSlackMessage(e.target.value)}
-                className="min-h-[200px] h-[200px] font-mono text-sm overflow-y-auto"
-              />
+              <div className="relative">
+                <Textarea 
+                  value={slackMessage} 
+                  onChange={(e) => setSlackMessage(e.target.value)}
+                  className="min-h-[200px] h-[200px] font-mono text-sm"
+                />
+                {isLoading.slack && (
+                  <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm text-muted-foreground mt-2">Generating Slack message...</p>
+                  </div>
+                )}
+              </div>
               <div className="flex justify-between">
-                <Button variant="outline" onClick={() => handleRegenerateCaption("slack")}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                <Button variant="outline" onClick={() => handleRegenerateCaption("slack")} disabled={isLoading.slack}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.slack ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
                 <div className="space-x-2">

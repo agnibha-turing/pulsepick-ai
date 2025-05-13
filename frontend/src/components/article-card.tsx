@@ -6,6 +6,7 @@ import { DisplayArticle } from "@/services/article-service";
 import { Share, BookmarkPlus, Linkedin, Twitter, Mail, MessageSquare, ArrowUpRight, ChevronDown, CheckSquare, Square } from "lucide-react";
 import { useSelectedArticles } from "@/context/selected-articles-context";
 import { MessageDialog } from "@/components/message-dialog";
+import { usePersona } from "@/context/persona-context";
 import { 
   Dialog,
   DialogContent,
@@ -37,6 +38,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
   // Treat article as ExtendedArticle to handle optional author field
   const extendedArticle = article as ExtendedArticle;
   const { toggleArticleSelection, isArticleSelected } = useSelectedArticles();
+  const { activePersona } = usePersona();
   const isSelected = isArticleSelected(article.id);
 
   const [shareOpen, setShareOpen] = useState(false);
@@ -380,6 +382,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
         open={shareOpen}
         onOpenChange={setShareOpen}
         articles={[article]}
+        persona={activePersona}
         mode="share"
       />
     </>
