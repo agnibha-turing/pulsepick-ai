@@ -25,6 +25,7 @@ class Article(BaseModel):
     categories: List[str]
     source: str
     keywords: Optional[List[str]] = []
+    url: str  # Add URL field to the Article model
 
 
 class Persona(BaseModel):
@@ -112,6 +113,8 @@ def construct_prompt(articles: List[Article], persona: Optional[Persona], platfo
     article_info = ""
     for i, article in enumerate(articles, 1):
         article_info += f"Article {i}: {article.title}\n"
+        # Include the URL in article information
+        article_info += f"URL: {article.url}\n"
         article_info += f"Summary: {article.summary[0]}\n"
         article_info += f"Categories: {', '.join(article.categories)}\n"
         if article.keywords:
@@ -179,21 +182,41 @@ def construct_prompt(articles: List[Article], persona: Optional[Persona], platfo
         "email": (
             "Create a professional email that summarizes the key points from these articles. "
             "Use a formal business tone with a clear subject line, greeting, body, and sign-off. "
+            "IMPORTANT: Include the article URLs naturally in the text by mentioning 'You can read the full article here: [URL]' or similar. "
+            "For multiple articles, mention each URL in context with its corresponding points. "
             "Format the message as 'Subject: [subject]\n\n[email body]'"
         ),
         "linkedin": (
             "Write a LinkedIn post highlighting insights from these articles. "
             "Use a professional but conversational tone. Include relevant hashtags. "
+            "IMPORTANT: When including multiple article URLs, PUT EACH URL ON A SEPARATE LINE with line breaks between them. "
+            "Example format:\n"
+            "Your insightful message here\n\n"
+            "Read more:\n"
+            "https://first-url.com\n"
+            "https://second-url.com\n\n"
+            "#Hashtags #MoreHashtags\n"
+            "This prevents URLs from running together. "
             "Keep it concise (under 1300 characters) and engaging for a professional audience."
         ),
         "twitter": (
             "Create a Twitter/X post about these articles. "
-            "Be extremely concise (under 280 characters). "
-            "Include relevant hashtags and make it attention-grabbing."
+            "Be concise but informative (under 280 characters). "
+            "IMPORTANT: Include ALL article URLs in the post. EACH URL MUST BE ON ITS OWN LINE with a line break between them. "
+            "Example format for multiple URLs:\n"
+            "Your message text here\n\n"
+            "https://first-url.com\n\n"
+            "https://second-url.com\n\n"
+            "#Hashtags\n"
+            "This ensures URLs don't concatenate. URLs are counted as 23 characters each regardless of length. "
+            "Include relevant hashtags and make the message attention-grabbing."
         ),
         "slack": (
             "Write a message for Slack that shares these article insights. "
-            "Use a casual, friendly tone with some Slack-appropriate formatting (like *bold* or _italic_). "
+            "Use a casual, friendly tone with standard Slack formatting (like *bold* or _italic_). "
+            "IMPORTANT: For Slack hyperlinks, use exactly this format: '<URL|clickable text>' (without quotes). "
+            "For example: '<https://example.com|Check out this article>' will create a clickable link with the text 'Check out this article'. "
+            "Include these hyperlinks naturally in your message. "
             "Keep it conversational but informative."
         )
     }

@@ -62,36 +62,57 @@ function generateFallbackMessage(request: MessageGenerationRequest): string {
       message = `Subject: Sharing some interesting articles\n\nHi${persona?.recipientName ? ' ' + persona.recipientName : ''},\n\nI wanted to share these articles that might interest you:\n\n`;
       articles.forEach((article, index) => {
         message += `${index + 1}. ${article.title}\n`;
+        message += `   You can read the full article here: ${article.url}\n\n`;
       });
       message += "\nBest regards,";
       break;
       
     case "linkedin":
       message = `I wanted to share some valuable insights`;
-      if (articles.length > 0) {
-        message += ` about "${articles[0].title}"`;
+      if (articles.length === 1) {
+        message += ` about "${articles[0].title}" that I think could benefit professionals in our industry.`;
+        message += `\n\nRead more here:\n${articles[0].url}`;
+      } else {
+        message += ` that I think could benefit professionals in our industry.`;
+        
+        message += `\n\nRead more:`;
+        // Add each URL on its own line
+        articles.forEach((article) => {
+          message += `\n${article.url}`;
+        });
       }
-      message += `. #ProfessionalInsights`;
+      message += `\n\n#ProfessionalInsights #IndustryTrends #AI`;
       break;
       
     case "twitter":
-      message = `Check out this interesting insight`;
-      if (articles.length > 0) {
-        message += `: "${articles[0].title.substring(0, 100)}"`;
+      if (articles.length === 1) {
+        message = `Check out this insight: "${articles[0].title.substring(0, 60)}..."`;
+        message += `\n\n${articles[0].url}`;
+      } else {
+        // For multiple articles, create a more general message with all URLs
+        message = `Key industry insights to explore:`;
+        
+        // Add each URL on its own line with double line breaks between
+        articles.forEach((article) => {
+          message += `\n\n${article.url}`;
+        });
       }
+      message += `\n\n#AI #IndustryInsights #Tech`;
       break;
       
     case "slack":
-      message = `*Here are some articles that might interest you:*\n`;
+      message = `*Here are some articles that might interest you:*\n\n`;
       articles.forEach((article, index) => {
-        message += `>${index + 1}. ${article.title}\n`;
+        // Proper Slack link format
+        message += `${index + 1}. <${article.url}|${article.title}>\n`;
       });
       break;
       
     default:
-      message = `Here are some articles I thought you might find interesting:\n`;
+      message = `Here are some articles I thought you might find interesting:\n\n`;
       articles.forEach((article, index) => {
         message += `${index + 1}. ${article.title}\n`;
+        message += `   Read more: ${article.url}\n\n`;
       });
   }
   
