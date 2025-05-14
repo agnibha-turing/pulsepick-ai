@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   Dialog,
   DialogContent,
@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { DisplayArticle } from "@/services/article-service";
 import { Persona } from "@/components/persona-input-card";
-import { Linkedin, Twitter, Mail, MessageSquare, RefreshCw, ScrollText, Loader2 } from "lucide-react";
+import { Linkedin, Twitter, Mail, Slack, RefreshCw, ScrollText, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -49,15 +49,23 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
     slack: false
   });
   
-  // Generate initial messages when dialog opens or articles/persona change
-  useEffect(() => {
-    if (open) {
-      generateAllMessages();
-    }
-  }, [open, articles, persona, mode]);
+  // Legacy client-side fallback generator
+  const generateShareMessages = useCallback((article: DisplayArticle) => {
+    const messages = {
+      linkedin: `I found this valuable insight on ${article.title} that might interest my network. #PulsePick #ProfessionalInsights ${article.categories.map(c => `#${c.replace(/\s+/g, '')}`).join(' ')}`,
+      twitter: `Check out this key insight: "${article.title}" via @PulsePick ${article.categories.map(c => `#${c.replace(/\s+/g, '')}`).join(' ')}`,
+      email: `Subject: Thought you might find this interesting\n\nHi${persona?.recipientName ? ' ' + persona.recipientName : ''},\n\nI came across this article that I think could be relevant to our discussion:\n\n"${article.title}"\n\n${article.summary[0]}\n\nBest regards,`,
+      slack: `*Here's an insight I found valuable:*\n"${article.title}"\n>${article.summary[0]}\nvia PulsePick`
+    };
+    
+    setLinkedinMessage(messages.linkedin);
+    setTwitterMessage(messages.twitter);
+    setEmailMessage(messages.email);
+    setSlackMessage(messages.slack);
+  }, [persona]);
   
   // Function to generate messages for all platforms
-  const generateAllMessages = async () => {
+  const generateAllMessages = useCallback(async () => {
     setIsLoading({
       linkedin: true,
       twitter: true,
@@ -90,22 +98,14 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
         slack: false
       });
     }
-  };
+  }, [articles, persona, article, generateShareMessages]);
   
-  // Legacy client-side fallback generator
-  const generateShareMessages = (article: DisplayArticle) => {
-    const messages = {
-      linkedin: `I found this valuable insight on ${article.title} that might interest my network. #PulsePick #ProfessionalInsights ${article.categories.map(c => `#${c.replace(/\s+/g, '')}`).join(' ')}`,
-      twitter: `Check out this key insight: "${article.title}" via @PulsePick ${article.categories.map(c => `#${c.replace(/\s+/g, '')}`).join(' ')}`,
-      email: `Subject: Thought you might find this interesting\n\nHi${persona?.recipientName ? ' ' + persona.recipientName : ''},\n\nI came across this article that I think could be relevant to our discussion:\n\n"${article.title}"\n\n${article.summary[0]}\n\nBest regards,`,
-      slack: `*Here's an insight I found valuable:*\n"${article.title}"\n>${article.summary[0]}\nvia PulsePick`
-    };
-    
-    setLinkedinMessage(messages.linkedin);
-    setTwitterMessage(messages.twitter);
-    setEmailMessage(messages.email);
-    setSlackMessage(messages.slack);
-  };
+  // Generate initial messages when dialog opens or articles/persona change
+  useEffect(() => {
+    if (open) {
+      generateAllMessages();
+    }
+  }, [open, generateAllMessages]);
   
   // Regenerate messages with API
   const handleRegenerateCaption = async (platform: string) => {
@@ -228,10 +228,10 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
               </TabsTrigger>
               <TabsTrigger value="twitter" className="flex items-center gap-2">
                 <Twitter className="h-4 w-4" />
-                <span className="hidden sm:inline">Twitter</span>
+                <span className="hidden sm:inline">X/Twitter</span>
               </TabsTrigger>
               <TabsTrigger value="slack" className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
+                <Slack className="h-4 w-4" />
                 <span className="hidden sm:inline">Slack</span>
               </TabsTrigger>
             </TabsList>
@@ -255,13 +255,10 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
                   <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.email ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => copyToClipboard(emailMessage)}>
-                    <ScrollText className="h-4 w-4 mr-2" />
-                    Copy
-                  </Button>
-                  <Button onClick={() => handleShare("Email")}>Send</Button>
-                </div>
+                <Button variant="default" onClick={() => copyToClipboard(emailMessage)}>
+                  <ScrollText className="h-4 w-4 mr-2" />
+                  Copy to Clipboard
+                </Button>
               </div>
             </TabsContent>
             
@@ -284,13 +281,10 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
                   <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.linkedin ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => copyToClipboard(linkedinMessage)}>
-                    <ScrollText className="h-4 w-4 mr-2" />
-                    Copy
-                  </Button>
-                  <Button onClick={() => handleShare("LinkedIn")}>Post</Button>
-                </div>
+                <Button variant="default" onClick={() => copyToClipboard(linkedinMessage)}>
+                  <ScrollText className="h-4 w-4 mr-2" />
+                  Copy to Clipboard
+                </Button>
               </div>
             </TabsContent>
             
@@ -304,7 +298,7 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
                 {isLoading.twitter && (
                   <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <p className="text-sm text-muted-foreground mt-2">Generating Twitter post...</p>
+                    <p className="text-sm text-muted-foreground mt-2">Generating X/Twitter post...</p>
                   </div>
                 )}
               </div>
@@ -313,13 +307,10 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
                   <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.twitter ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => copyToClipboard(twitterMessage)}>
-                    <ScrollText className="h-4 w-4 mr-2" />
-                    Copy
-                  </Button>
-                  <Button onClick={() => handleShare("Twitter")}>Post</Button>
-                </div>
+                <Button variant="default" onClick={() => copyToClipboard(twitterMessage)}>
+                  <ScrollText className="h-4 w-4 mr-2" />
+                  Copy to Clipboard
+                </Button>
               </div>
             </TabsContent>
             
@@ -342,13 +333,10 @@ export function MessageDialog({ open, onOpenChange, articles, persona, mode }: M
                   <RefreshCw className={`h-4 w-4 mr-2 ${isLoading.slack ? 'animate-spin' : ''}`} />
                   Regenerate
                 </Button>
-                <div className="space-x-2">
-                  <Button variant="outline" onClick={() => copyToClipboard(slackMessage)}>
-                    <ScrollText className="h-4 w-4 mr-2" />
-                    Copy
-                  </Button>
-                  <Button onClick={() => handleShare("Slack")}>Send</Button>
-                </div>
+                <Button variant="default" onClick={() => copyToClipboard(slackMessage)}>
+                  <ScrollText className="h-4 w-4 mr-2" />
+                  Copy to Clipboard
+                </Button>
               </div>
             </TabsContent>
           </Tabs>

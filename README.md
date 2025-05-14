@@ -10,6 +10,7 @@ PulsePick AI is a tool for sales and marketing professionals to discover, curate
 - 🔎 **Content Selection**: Choose single or multiple articles to share with prospects
 - ✉️ **Personalized Messaging**: Generate platform-specific content tailored to recipients
 - 📊 **Intelligent Ranking**: Content relevance scoring based on multiple factors
+- 🔄 **Auto-Refresh**: Articles are fetched every 30 minutes and reranked 5 minutes later
 
 ## Key Components
 
@@ -91,9 +92,18 @@ Efficiently manage your content sharing:
 
 6. The application is now available at:
 
-   - Frontend: http://localhost:5173
+   - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
    - API docs: http://localhost:8000/docs
+
+## Content Refresh and Reranking
+
+PulsePick AI keeps your content fresh and relevant through scheduled processes:
+
+- **Article Fetching**: Every 30 minutes, the system automatically fetches new articles from various sources (Google News, NewsAPI, LinkedIn)
+- **Content Reranking**: 5 minutes after each fetch, all articles are reranked based on relevance scoring
+- **Last Updated Timestamp**: The UI displays when articles were last fetched or reranked in your local timezone
+- **Manual Refresh**: Users can manually trigger a refresh at any time using the refresh button
 
 ## Component Architecture
 
