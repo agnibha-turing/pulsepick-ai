@@ -1,3 +1,5 @@
+import { Persona } from "@/components/persona-input-card";
+
 export interface BackendArticle {
   id: number;
   title: string;
@@ -170,10 +172,16 @@ const transformToDisplayArticle = (article: BackendArticle): DisplayArticle => {
   };
 };
 
-export const getArticles = async (filters: string[] = []): Promise<{ articles: DisplayArticle[], lastUpdated: string }> => {
+export const getArticles = async (
+  filters: string[] = [], 
+  persona: Persona | null = null,
+  useLLM: boolean = true
+): Promise<{ articles: DisplayArticle[], lastUpdated: string, personaApplied?: boolean, llmEnhanced?: boolean }> => {
   try {
     // Try to fetch from backend first
     let apiUrl = API_URL;
+    let method = "GET";
+    let body = null;
     
     // Add industry filter if a specific one is requested (except "All")
     if (filters.length === 1 && filters[0] !== "All") {
@@ -183,18 +191,40 @@ export const getArticles = async (filters: string[] = []): Promise<{ articles: D
       apiUrl += `?balanced=true`;
     }
     
-    const response = await fetch(apiUrl);
+    // If persona is provided, switch to POST request with persona in body
+    if (persona) {
+      method = "POST";
+      
+      // Add query parameter for LLM usage
+      if (apiUrl.includes('?')) {
+        apiUrl += `&use_llm=${useLLM}`;
+      } else {
+        apiUrl += `?use_llm=${useLLM}`;
+      }
+      
+      body = JSON.stringify({ persona });
+    }
+    
+    const response = await fetch(apiUrl, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
+    });
     
     // If the request was successful
     if (response.ok) {
-      const data: ArticleResponse = await response.json();
+      const data: ArticleResponse & { persona_applied?: boolean, llm_enhanced?: boolean } = await response.json();
       
       // Transform articles to display format
       const displayArticles = data.articles.map(transformToDisplayArticle);
       
       return {
         articles: displayArticles,
-        lastUpdated: data.last_updated
+        lastUpdated: data.last_updated,
+        personaApplied: data.persona_applied,
+        llmEnhanced: data.llm_enhanced
       };
     } else {
       console.warn("Failed to fetch from backend API, falling back to mock data");
@@ -217,13 +247,90 @@ export const getArticles = async (filters: string[] = []): Promise<{ articles: D
       );
     }
     
+    // Apply mock persona filtering if persona is provided
+    if (persona && persona.recipientName) {
+      // Simple mock implementation of persona relevance
+      filteredMocks = filteredMocks.map(article => {
+        // Check if article contains anything relevant to the persona
+        const articleText = `${article.title} ${article.summary}`.toLowerCase();
+        const personaText = `${persona.recipientName} ${persona.jobTitle} ${persona.company} ${persona.conversationContext}`.toLowerCase();
+        
+        // Simple word matching for demo purposes
+        const personaWords = personaText.split(/\s+/).filter(w => w.length > 3);
+        let matchCount = 0;
+        
+        for (const word of personaWords) {
+          if (articleText.includes(word)) {
+            matchCount++;
+          }
+        }
+        
+        // Adjust relevance score based on matches (simple mock algorithm)
+        if (matchCount > 0) {
+          article.relevance_score = Math.min(0.95, article.relevance_score + (matchCount * 0.05));
+        }
+        
+        return article;
+      });
+      
+      // Sort by adjusted relevance score
+      filteredMocks.sort((a, b) => b.relevance_score - a.relevance_score);
+    }
+    
     // Transform mocks to display format
     const displayArticles = filteredMocks.map(transformToDisplayArticle);
     
     // Return with the current time as lastUpdated for mock data
     return {
       articles: displayArticles,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      personaApplied: !!persona,
+      llmEnhanced: false
     };
+  }
+};
+
+/**
+ * Send a batch of articles to be scored for a specific persona
+ */
+export const batchScoreArticles = async (
+  articleIds: string[],
+  persona: Persona
+): Promise<{ [id: string]: number }> => {
+  try {
+    const response = await fetch(`${API_URL}/batch-score`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        article_ids: articleIds,
+        persona: persona
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error("Failed to score articles");
+    }
+    
+    const data = await response.json();
+    
+    // Convert the scored articles array to a map of id -> score
+    const scoreMap: { [id: string]: number } = {};
+    data.scored_articles.forEach((article: { id: number, relevance_score: number }) => {
+      scoreMap[article.id.toString()] = article.relevance_score;
+    });
+    
+    return scoreMap;
+  } catch (error) {
+    console.error("Error scoring articles:", error);
+    
+    // Fallback: return a map with default scores
+    const defaultScoreMap: { [id: string]: number } = {};
+    articleIds.forEach(id => {
+      defaultScoreMap[id] = 0.5; // Default middle score
+    });
+    
+    return defaultScoreMap;
   }
 };

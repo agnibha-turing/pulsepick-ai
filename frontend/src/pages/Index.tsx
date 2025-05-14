@@ -5,7 +5,7 @@ import { ArticleCard } from "@/components/article-card";
 import { FilterChips } from "@/components/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getArticles, DisplayArticle } from "@/services/article-service";
+import { getArticles, DisplayArticle, batchScoreArticles } from "@/services/article-service";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -16,6 +16,7 @@ import { usePersona } from "@/context/persona-context";
 import { useSelectedArticles } from "@/context/selected-articles-context";
 import { GenerateMessageFab } from "@/components/generate-message-fab";
 import { toast } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   Share, 
   Filter, 
@@ -25,6 +26,7 @@ import {
   Menu,
   Home,
   User,
+  UserPlus,
   Settings,
   SlidersHorizontal,
   PlusCircle,
@@ -45,12 +47,52 @@ const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Technology", "Healthcare
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
 const AVAILABLE_TIME_PERIODS = ["Today", "7 Days", "30 Days", "Custom"];
 
+// Add these animation variants outside the component
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { 
+    opacity: 1,
+    transition: { 
+      staggerChildren: 0.05
+    }
+  }
+};
+
+const itemVariants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: { 
+    y: 0, 
+    opacity: 1,
+    transition: { 
+      type: "spring", 
+      stiffness: 200, 
+      damping: 25 
+    }
+  }
+};
+
+const emptyStateVariants = {
+  hidden: { opacity: 0, scale: 0.9 },
+  visible: { 
+    opacity: 1, 
+    scale: 1,
+    transition: { 
+      type: "spring", 
+      stiffness: 300, 
+      damping: 25 
+    }
+  }
+};
+
 const Index = () => {
   const [articles, setArticles] = useState<DisplayArticle[]>([]);
+  const [personalizedArticles, setPersonalizedArticles] = useState<DisplayArticle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingPersonalized, setLoadingPersonalized] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("All");
   const [activeIndustry, setActiveIndustry] = useState("All");
   const [contentTypes, setContentTypes] = useState<string[]>(["Articles"]);
   const [timePeriod, setTimePeriod] = useState("7 Days");
@@ -59,37 +101,309 @@ const Index = () => {
   const [refreshing, setRefreshing] = useState(false);
   const { activePersona, setActivePersona, isPersonaActive } = usePersona();
   const { selectedArticles, selectedCount } = useSelectedArticles();
+  const [personaApplied, setPersonaApplied] = useState(false);
+  const [llmEnhanced, setLlmEnhanced] = useState(false);
+  const [personaDialogOpen, setPersonaDialogOpen] = useState(false);
 
-  const fetchArticles = useCallback(async () => {
-    setLoading(true);
+  // New state for tracking all articles from all tabs
+  const [allTabsArticles, setAllTabsArticles] = useState<DisplayArticle[]>([]);
+  const [loadedIndustries, setLoadedIndustries] = useState<Set<string>>(new Set(["All"]));
+  const [isLoadingAllTabs, setIsLoadingAllTabs] = useState(false);
+  const [isBatchPersonalizing, setIsBatchPersonalizing] = useState(false);
+
+  // Add a new state for tracking when personalization was last done
+  const [lastPersonalizationTime, setLastPersonalizationTime] = useState<number | null>(null);
+  const [lastPersonaId, setLastPersonaId] = useState<string | null>(null);
+
+  // Fetch regular articles (recency-based sorting)
+  const fetchArticles = useCallback(async (industry: string = activeIndustry) => {
+    if (industry === activeIndustry) {
+      setLoading(true);
+    }
+    
     try {
       const filters = [...activeFilters];
-      if (activeIndustry !== "All") {
-        filters.push(activeIndustry);
+      if (industry !== "All") {
+        filters.push(industry);
       }
       
-      const result = await getArticles(filters);
-      setArticles(result.articles);
-      setLastUpdated(result.lastUpdated);
+      // Always fetch with no persona for regular tabs
+      const result = await getArticles(filters, null);
+      
+      // Update the appropriate state
+      if (industry === activeIndustry) {
+        setArticles(result.articles);
+        setLastUpdated(result.lastUpdated);
+      }
+      
+      // Add to the collection of all articles
+      setAllTabsArticles(prevArticles => {
+        // Create a new array with all existing articles
+        const newArticles = [...prevArticles];
+        
+        // Add the newly fetched articles, avoiding duplicates
+        result.articles.forEach(article => {
+          if (!newArticles.some(a => a.id === article.id)) {
+            newArticles.push(article);
+          }
+        });
+        
+        return newArticles;
+      });
+      
+      // Mark this industry as loaded
+      setLoadedIndustries(prev => {
+        const newSet = new Set(prev);
+        newSet.add(industry);
+        return newSet;
+      });
+      
     } catch (error) {
-      console.error("Error fetching articles:", error);
-      toast.error("Failed to load articles");
+      console.error(`Error fetching articles for ${industry}:`, error);
+      if (industry === activeIndustry) {
+        toast.error("Failed to load articles");
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (industry === activeIndustry) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [activeFilters, activeIndustry]);
 
+  // Fetch articles for all industries to build our complete article set
+  const fetchAllIndustryTabs = useCallback(async () => {
+    setIsLoadingAllTabs(true);
+    
+    try {
+      // Fetch the "All" tab first if not already loaded
+      if (!loadedIndustries.has("All")) {
+        await fetchArticles("All");
+      }
+      
+      // Then fetch the rest of the industries
+      const industryPromises = AVAILABLE_INDUSTRIES
+        .filter(industry => industry !== "All" && !loadedIndustries.has(industry))
+        .map(industry => fetchArticles(industry));
+      
+      await Promise.all(industryPromises);
+      
+      toast.success("Content loaded for personalization", {
+        description: "Ready to personalize content based on your preferences",
+        duration: 3000
+      });
+      
+    } catch (error) {
+      console.error("Error loading all industries:", error);
+    } finally {
+      setIsLoadingAllTabs(false);
+    }
+  }, [fetchArticles, loadedIndustries]);
+
+  // Personalize articles using LLM
+  const personalizeArticles = useCallback(async () => {
+    if (!isPersonaActive || !activePersona) return;
+    
+    setIsBatchPersonalizing(true);
+    
+    try {
+      // Make sure we have articles from all tabs
+      if (allTabsArticles.length === 0 || loadedIndustries.size < 2) {
+        await fetchAllIndustryTabs();
+      }
+      
+      toast.info("Personalizing content...", {
+        description: "Using AI to find the most relevant articles for your persona",
+        duration: 5000
+      });
+      
+      // Get the IDs of all the unique articles
+      const uniqueArticleIds = Array.from(
+        new Set(allTabsArticles.map(article => article.id))
+      );
+      
+      // Get personalization scores for all articles
+      const scoreMap = await batchScoreArticles(uniqueArticleIds, activePersona);
+      
+      // Create a copy of all articles with scores applied
+      const scoredArticles = allTabsArticles.map(article => ({
+        ...article,
+        personaScore: scoreMap[article.id] || 0.5  // Use default if no score
+      }));
+      
+      // Remove duplicates (by ID)
+      const uniqueArticles = Array.from(
+        new Map(scoredArticles.map(article => [article.id, article])).values()
+      );
+      
+      // Sort by personalization score (descending)
+      uniqueArticles.sort((a, b) => (b.personaScore || 0) - (a.personaScore || 0));
+      
+      // Update state with personalized articles
+      setPersonalizedArticles(uniqueArticles);
+      setPersonaApplied(true);
+      setLlmEnhanced(true);
+      
+      // Track when this personalization was done and for which persona
+      setLastPersonalizationTime(Date.now());
+      setLastPersonaId(activePersona.recipientName);
+      
+      toast.success("Content personalized successfully", {
+        description: `Found ${uniqueArticles.length} articles ranked for ${activePersona.recipientName}`,
+        duration: 3000
+      });
+      
+    } catch (error) {
+      console.error("Error personalizing articles:", error);
+      toast.error("Failed to personalize content");
+    } finally {
+      setIsBatchPersonalizing(false);
+    }
+  }, [
+    isPersonaActive, 
+    activePersona, 
+    allTabsArticles, 
+    loadedIndustries, 
+    fetchAllIndustryTabs
+  ]);
+
+  // Personalize articles when persona changes
+  useEffect(() => {
+    // Only personalize if:
+    // 1. We have a persona active AND
+    // 2. We have NOT personalized for this specific persona yet
+    // 3. AND we're not already in the process of personalizing
+    const needsPersonalization = 
+      isPersonaActive && 
+      activePersona?.recipientName &&
+      lastPersonaId !== activePersona.recipientName && 
+      !isBatchPersonalizing;
+    
+    if (needsPersonalization) {
+      // Only perform personalization once per persona
+      personalizeArticles();
+    }
+  }, [
+    isPersonaActive, 
+    activePersona, 
+    lastPersonaId, 
+    isBatchPersonalizing,
+    personalizeArticles
+  ]);
+
+  // Switch to personalized tab when persona is activated
+  useEffect(() => {
+    if (isPersonaActive && activePersona?.recipientName) {
+      setActiveTab("Personalized");
+      
+      // Only show toast if we're applying a new persona (not on tab switches)
+      if (lastPersonaId !== activePersona.recipientName) {
+        toast.info(
+          `Articles personalized for ${activePersona.recipientName}`,
+          {
+            description: "Switch between tabs to compare personalized and regular views",
+            duration: 3000
+          }
+        );
+      }
+    }
+  }, [isPersonaActive, activePersona?.recipientName, lastPersonaId]);
+
+  // Handle tab change without triggering personalization
+  const handleTabChange = (value: string) => {
+    if (value === "Personalized") {
+      // Simply switch to the personalized tab without re-personalizing
+      setActiveTab("Personalized");
+      
+      // Only personalize if we've never personalized for this persona before
+      // This should be rare since the persona-change useEffect should handle this
+      const neverPersonalizedForCurrentPersona = 
+        isPersonaActive && 
+        activePersona?.recipientName &&
+        lastPersonaId !== activePersona.recipientName && 
+        !isBatchPersonalizing;
+      
+      if (neverPersonalizedForCurrentPersona) {
+        personalizeArticles();
+      }
+    } else {
+      // If switching to a regular industry tab
+      setActiveTab(value);
+      setActiveIndustry(value);
+    }
+  };
+
+  // Fetch regular articles on mount and when filters change
   useEffect(() => {
     fetchArticles();
   }, [fetchArticles]);
 
+  // Fetch articles for all tabs in the background
+  useEffect(() => {
+    // Start loading all tabs in the background
+    if (!isLoadingAllTabs && loadedIndustries.size < AVAILABLE_INDUSTRIES.length) {
+      fetchAllIndustryTabs();
+    }
+  }, [fetchAllIndustryTabs, isLoadingAllTabs, loadedIndustries]);
+
+  // Handle refresh button click
   const handleRefresh = async () => {
     setRefreshing(true);
     toast.info("Refreshing articles...");
-    await fetchArticles();
-    toast.success("Articles refreshed successfully");
+    
+    try {
+      // Refresh the current active view
+      if (activeTab === "Personalized" && isPersonaActive) {
+        // For personalized view, we need to rebuild our article collection
+        // Clear existing collections
+        setAllTabsArticles([]);
+        setLoadedIndustries(new Set());
+        
+        // Refetch and personalize
+        await fetchAllIndustryTabs();
+        await personalizeArticles();
+      } else {
+        // Just refresh the current industry tab
+        await fetchArticles();
+      }
+      
+      // Add a small delay before showing success message
+      setTimeout(() => {
+        toast.success("Articles refreshed successfully");
+      }, 500);
+    } catch (error) {
+      // If there was an error, it will be handled in fetchArticles
+      // and we don't need to show the success message
+    }
   };
+
+  // Determine which articles to display
+  const displayArticles = activeTab === "Personalized" ? personalizedArticles : articles;
+  const isPersonalizedView = activeTab === "Personalized";
+  const isLoading = (isPersonalizedView ? isBatchPersonalizing : loading) || refreshing;
+
+  // Function to open the persona dialog
+  const handleOpenPersonaDialog = () => {
+    setPersonaDialogOpen(true);
+  };
+
+  // Render the empty state for personalized tab when no persona
+  const renderPersonalizedEmptyState = () => (
+    <div className="text-center py-12 max-w-md mx-auto">
+      <div className="bg-primary/5 p-6 rounded-lg mb-6">
+        <UserPlus className="h-12 w-12 text-primary/70 mx-auto mb-4" />
+      </div>
+      <h3 className="text-xl font-medium">Personalize Your Content</h3>
+      <p className="text-muted-foreground mt-3 mb-6">
+        Create a persona to see articles that matter most to you or your recipients. 
+        Content will be intelligently ranked based on relevance to job role, industry, and interests.
+      </p>
+      <Button onClick={handleOpenPersonaDialog} className="gap-2">
+        <UserPlus className="h-4 w-4" />
+        Create Persona
+      </Button>
+    </div>
+  );
 
   const formatLastUpdated = (timestamp: string) => {
     try {
@@ -220,15 +534,34 @@ const Index = () => {
         </div>
       </header>
 
-      {/* Industry Tabs - Sticky below header */}
+      {/* Modified Industry Tabs */}
       <div className="sticky top-16 z-20 border-b translucent-navbar shadow-sm">
         <div className="container px-4 py-2 overflow-x-auto scrollbar-none">
           <Tabs 
-            defaultValue={activeIndustry} 
-            onValueChange={setActiveIndustry}
+            defaultValue={activeTab} 
+            value={activeTab}
+            onValueChange={handleTabChange}
             className="w-full"
           >
             <TabsList className="w-full flex justify-start p-0 h-10 bg-transparent space-x-2">
+              {/* Personalized Tab - Always Visible */}
+              <TabsTrigger 
+                key="Personalized"
+                value="Personalized" 
+                className="px-4 py-2 rounded-md border border-transparent transition-all duration-200
+                hover:bg-background/60 hover:border-border/30
+                data-[state=active]:bg-primary data-[state=active]:text-primary-foreground
+                data-[state=active]:shadow-sm data-[state=active]:border-transparent
+                outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 !ring-0
+                flex items-center gap-1.5"
+              >
+                <User className="h-3.5 w-3.5" />
+                {isPersonaActive && activePersona?.recipientName 
+                  ? `For ${activePersona.recipientName.split(' ')[0]}` 
+                  : "Personalized"}
+              </TabsTrigger>
+              
+              {/* Original Industry Tabs */}
               {AVAILABLE_INDUSTRIES.map(industry => (
                 <TabsTrigger 
                   key={industry}
@@ -271,12 +604,19 @@ const Index = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-2xl font-bold">
-                {activeIndustry === "All" ? "All Industries" : activeIndustry}
+                {activeTab === "Personalized" 
+                  ? "Personalized Content" 
+                  : (activeTab === "All" ? "All Industries" : activeTab)}
               </h1>
-              {isPersonaActive && activePersona?.recipientName && (
+              {isPersonaActive && activePersona?.recipientName && activeTab === "Personalized" && (
                 <p className="text-sm text-muted-foreground mt-1">
                   Content ranked for <span className="font-medium">{activePersona.recipientName}</span>
                   {activePersona.jobTitle && ` (${activePersona.jobTitle})`}
+                  {personaApplied && (
+                    <Badge variant="outline" className="ml-2 bg-primary/10 text-primary text-xs">
+                      AI Personalized
+                    </Badge>
+                  )}
                 </p>
               )}
               {lastUpdated && (
@@ -291,12 +631,19 @@ const Index = () => {
                 size="sm" 
                 className="gap-2"
                 onClick={handleRefresh}
-                disabled={loading || refreshing}
+                disabled={loading || refreshing || isBatchPersonalizing || isLoadingAllTabs}
               >
-                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${
+                  refreshing || isBatchPersonalizing || isLoadingAllTabs ? 'animate-spin' : ''
+                }`} />
                 <span className="hidden sm:inline">Refresh</span>
               </Button>
-              <PersonaInputCard className="w-auto" />
+              <PersonaInputCard 
+                className="w-auto persona-button" 
+                onRefreshRequest={personalizeArticles} 
+                isOpen={personaDialogOpen}
+                onOpenChange={setPersonaDialogOpen}
+              />
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -313,7 +660,7 @@ const Index = () => {
             </div>
           </div>
           
-          {loading ? (
+          {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="bg-card rounded-lg p-6 space-y-3 border">
@@ -338,22 +685,36 @@ const Index = () => {
               ))}
             </div>
           ) : (
-            <>
-              {articles.length === 0 ? (
-                <div className="text-center py-12">
-                  <h3 className="text-xl font-medium">No content found</h3>
-                  <p className="text-muted-foreground mt-2">
-                    Try changing your filters or check back later
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {articles.map(article => (
-                    <ArticleCard key={article.id} article={article} />
-                  ))}
-                </div>
-              )}
-            </>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTab + (isPersonaActive ? 'persona' : 'no-persona')}
+                initial="hidden"
+                animate="visible"
+                exit="hidden"
+                variants={containerVariants}
+              >
+                {activeTab === "Personalized" && !isPersonaActive ? (
+                  <motion.div variants={emptyStateVariants}>
+                    {renderPersonalizedEmptyState()}
+                  </motion.div>
+                ) : displayArticles.length === 0 ? (
+                  <motion.div variants={emptyStateVariants} className="text-center py-12">
+                    <h3 className="text-xl font-medium">No content found</h3>
+                    <p className="text-muted-foreground mt-2">
+                      Try changing your filters or check back later
+                    </p>
+                  </motion.div>
+                ) : (
+                  <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" variants={containerVariants}>
+                    {displayArticles.map(article => (
+                      <motion.div key={article.id} variants={itemVariants}>
+                        <ArticleCard article={article} />
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+              </motion.div>
+            </AnimatePresence>
           )}
         </main>
       </div>
@@ -362,7 +723,7 @@ const Index = () => {
       <GenerateMessageFab />
 
       {/* Selection hint */}
-      {!loading && articles.length > 0 && selectedCount === 0 && (
+      {!loading && displayArticles.length > 0 && selectedCount === 0 && (
         <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 
           bg-primary/90 backdrop-blur-sm text-primary-foreground 
           rounded-full px-5 py-2.5 shadow-lg flex items-center gap-2.5

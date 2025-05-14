@@ -243,6 +243,336 @@ class ArticleProcessor:
         # Return just the recency score without industry weighting
         return recency_score
 
+    def _calculate_persona_relevance_score(self, article: Article, persona: dict) -> float:
+        """
+        Calculate a persona-based relevance score for the article using OpenAI.
+
+        This measures how relevant the article is to the specific persona based on:
+        - Job title relevance
+        - Industry alignment
+        - Conversation context
+        - Company relevance
+        - Personality traits
+
+        Returns a score from 0.0 to 1.0, where higher is more relevant.
+        """
+        # Default score if we can't calculate relevance
+        if not article.title or not article.summary:
+            return 0.5
+
+        try:
+            # Extract persona attributes
+            recipient_name = persona.get("recipientName", "")
+            job_title = persona.get("jobTitle", "")
+            company = persona.get("company", "")
+            conversation_context = persona.get("conversationContext", "")
+            personality_traits = persona.get("personalityTraits", "")
+
+            # Create a combined description of the persona
+            persona_description = f"Recipient: {recipient_name}\n"
+            if job_title:
+                persona_description += f"Job title: {job_title}\n"
+            if company:
+                persona_description += f"Company: {company}\n"
+            if conversation_context:
+                persona_description += f"Previous conversation context: {conversation_context}\n"
+            if personality_traits:
+                persona_description += f"Personality traits: {personality_traits}\n"
+
+            # Prepare article content
+            article_content = f"Title: {article.title}\nSummary: {article.summary}\nIndustry: {article.industry}"
+
+            # Create a prompt for OpenAI
+            prompt = f"""
+            I need to determine how relevant an article is to a specific person.
+            
+            PERSONA INFORMATION:
+            {persona_description}
+            
+            ARTICLE CONTENT:
+            {article_content}
+            
+            Consider the following aspects:
+            1. How relevant is this article to the person's job role and responsibilities?
+            2. How relevant is this article to the person's company or industry?
+            3. How well does this article connect to their previous conversation context?
+            4. Would this content be valuable to this specific person?
+            
+            Return a relevance score between 0.0 and 1.0 where:
+            - 0.0 means completely irrelevant
+            - 1.0 means extremely relevant and perfectly aligned with their interests
+            
+            Output only the numerical score (e.g., 0.87) without any explanation or additional text.
+            """
+
+            # Make the OpenAI API call
+            response = self.openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precision relevance scoring system that evaluates content relevance to specific personas."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1  # Low temperature for consistent results
+            )
+
+            # Extract the score from the response
+            result = response.choices[0].message.content.strip()
+
+            try:
+                # Try to convert to float
+                relevance_score = float(result)
+                # Ensure it's within 0-1 range
+                relevance_score = max(0.0, min(1.0, relevance_score))
+                return relevance_score
+            except ValueError:
+                # If conversion fails, use a fallback approach
+                logger.warning(
+                    f"Failed to parse OpenAI relevance score: {result}")
+                # Use a simple fallback for performance reasons when LLM call fails
+                return self._calculate_persona_relevance_fallback(article, persona)
+
+        except Exception as e:
+            logger.error(
+                f"Error calculating persona relevance with OpenAI: {e}")
+            # Fallback to simple matching if OpenAI call fails
+            return self._calculate_persona_relevance_fallback(article, persona)
+
+    def _calculate_persona_relevance_fallback(self, article: Article, persona: dict) -> float:
+        """Fallback method for persona relevance when OpenAI is unavailable."""
+        # Extract persona attributes
+        recipient_name = persona.get("recipientName", "")
+        job_title = persona.get("jobTitle", "")
+        company = persona.get("company", "")
+        conversation_context = persona.get("conversationContext", "")
+
+        # Initialize component scores
+        job_title_score = 0.0
+        company_score = 0.0
+        context_score = 0.0
+        industry_score = 0.0
+
+        # Combine article contents for analysis
+        article_content = f"{article.title}. {article.summary}".lower()
+
+        # 1. Calculate job title relevance
+        if job_title:
+            # Check if job title or related terms appear in content
+            job_terms = self._extract_job_role_terms(job_title)
+            matches = sum(1 for term in job_terms if term.lower()
+                          in article_content)
+            job_title_score = min(1.0, matches / max(1, len(job_terms)))
+
+        # 2. Calculate company relevance
+        if company:
+            # Simple check for company name mention
+            if company.lower() in article_content:
+                company_score = 1.0
+            else:
+                # Check for industry terms related to the company
+                company_terms = company.lower().split()
+                matches = sum(1 for term in company_terms if len(
+                    term) > 3 and term in article_content)
+                company_score = min(0.7, matches / max(1, len(company_terms)))
+
+        # 3. Calculate conversation context relevance
+        if conversation_context:
+            # Extract key terms from conversation context
+            context_terms = conversation_context.lower().split()
+            significant_terms = [
+                term for term in context_terms if len(term) > 3]
+
+            if significant_terms:
+                matches = sum(
+                    1 for term in significant_terms if term in article_content)
+                context_score = min(
+                    1.0, matches / max(1, len(significant_terms) * 0.5))
+
+        # 4. Calculate industry alignment
+        if article.industry and job_title:
+            # Extract industry from job title or company
+            persona_industry = self._infer_industry_from_text(
+                f"{job_title} {company}")
+
+            if persona_industry and persona_industry == article.industry:
+                industry_score = 1.0
+            else:
+                industry_score = 0.3  # Some baseline relevance for any industry
+
+        # Weight the different components
+        weights = {
+            "job_title": 0.25,
+            "company": 0.15,
+            "context": 0.4,
+            "industry": 0.2
+        }
+
+        persona_score = (
+            job_title_score * weights["job_title"] +
+            company_score * weights["company"] +
+            context_score * weights["context"] +
+            industry_score * weights["industry"]
+        )
+
+        # Ensure score is between 0 and 1
+        return max(0.0, min(1.0, persona_score))
+
+    def _extract_job_role_terms(self, job_title: str) -> list:
+        """Extract relevant terms from a job title for matching."""
+        # Common job title components
+        common_roles = [
+            "manager", "director", "executive", "analyst", "specialist",
+            "engineer", "developer", "architect", "consultant", "advisor",
+            "officer", "lead", "head", "chief", "vp", "president", "ceo", "cto", "cio"
+        ]
+
+        # Common industries/departments
+        common_departments = [
+            "sales", "marketing", "product", "engineering", "development", "finance",
+            "hr", "operations", "research", "strategy", "technology", "it", "security",
+            "data", "analytics", "customer", "support", "service", "business", "legal"
+        ]
+
+        job_title_lower = job_title.lower()
+        terms = job_title_lower.split()
+
+        # Add original terms
+        result = [term for term in terms if len(term) > 2]
+
+        # Add matched roles and departments
+        for role in common_roles:
+            if role in job_title_lower and role not in result:
+                result.append(role)
+
+        for dept in common_departments:
+            if dept in job_title_lower and dept not in result:
+                result.append(dept)
+
+        return result
+
+    def _infer_industry_from_text(self, text: str) -> str:
+        """Infer industry from text (job title, company, etc.)"""
+        text_lower = text.lower()
+
+        industry_keywords = {
+            "bfsi": ["bank", "finance", "insurance", "wealth", "investment", "trading", "fintech"],
+            "retail": ["retail", "ecommerce", "shop", "store", "consumer", "merchandise"],
+            "technology": ["tech", "software", "hardware", "cloud", "saas", "digital", "computer", "it"],
+            "healthcare": ["health", "medical", "pharma", "biotech", "hospital", "clinic", "patient"],
+            "other": []
+        }
+
+        for industry, keywords in industry_keywords.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    return industry
+
+        return "other"
+
+    def calculate_combined_relevance_score(self, article: Article, persona: dict = None) -> float:
+        """
+        Calculate a combined relevance score factoring in both recency and persona relevance.
+
+        If persona is provided, the formula is:
+        final_score = (w1 * recency_score) + (w2 * persona_relevance_score)
+
+        If no persona is provided, return just the recency score.
+        """
+        # Calculate recency score (time-based relevance)
+        recency_score = self._calculate_relevance_score(article)
+
+        # If no persona is provided, return just the recency score
+        if not persona:
+            return recency_score
+
+        # Calculate persona-based relevance using LLM only
+        # We're skipping the fallback method for accuracy
+        try:
+            # Extract persona attributes
+            recipient_name = persona.get("recipientName", "")
+            job_title = persona.get("jobTitle", "")
+            company = persona.get("company", "")
+            conversation_context = persona.get("conversationContext", "")
+            personality_traits = persona.get("personalityTraits", "")
+
+            # Create a combined description of the persona
+            persona_description = f"Recipient: {recipient_name}\n"
+            if job_title:
+                persona_description += f"Job title: {job_title}\n"
+            if company:
+                persona_description += f"Company: {company}\n"
+            if conversation_context:
+                persona_description += f"Previous conversation context: {conversation_context}\n"
+            if personality_traits:
+                persona_description += f"Personality traits: {personality_traits}\n"
+
+            # Prepare article content
+            article_content = f"Title: {article.title}\nSummary: {article.summary}\nIndustry: {article.industry}"
+
+            # Create a prompt for OpenAI
+            prompt = f"""
+            I need to determine how relevant an article is to a specific person.
+            
+            PERSONA INFORMATION:
+            {persona_description}
+            
+            ARTICLE CONTENT:
+            {article_content}
+            
+            Consider the following aspects:
+            1. How relevant is this article to the person's job role and responsibilities?
+            2. How relevant is this article to the person's company or industry?
+            3. How well does this article connect to their previous conversation context?
+            4. Would this content be valuable to this specific person?
+            
+            Return a relevance score between 0.0 and 1.0 where:
+            - 0.0 means completely irrelevant
+            - 1.0 means extremely relevant and perfectly aligned with their interests
+            
+            Output only the numerical score (e.g., 0.87) without any explanation or additional text.
+            """
+
+            # Make the OpenAI API call
+            response = self.openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precision relevance scoring system that evaluates content relevance to specific personas."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1  # Low temperature for consistent results
+            )
+
+            # Extract the score from the response
+            result = response.choices[0].message.content.strip()
+
+            try:
+                # Try to convert to float
+                persona_score = float(result)
+                # Ensure it's within 0-1 range
+                persona_score = max(0.0, min(1.0, persona_score))
+            except ValueError:
+                # If conversion fails, log the error and use a default score
+                logger.warning(
+                    f"Failed to parse OpenAI relevance score: {result}")
+                persona_score = 0.5  # Use middle value as default
+
+        except Exception as e:
+            logger.error(
+                f"Error calculating persona relevance with OpenAI: {e}")
+            # Use middle value as default in case of errors
+            persona_score = 0.5
+
+        # Weights for combining scores
+        w1 = 0.3  # Weight for recency
+        w2 = 0.7  # Weight for persona relevance
+
+        # Calculate combined score
+        final_score = (w1 * recency_score) + (w2 * persona_score)
+
+        # Ensure score is between 0 and 1
+        return max(0.0, min(1.0, final_score))
+
     def _enrich_metadata(self, title: str, content: str, url: str, raw_json: dict) -> Tuple[Optional[str], Optional[datetime]]:
         """
         Attempt to extract missing metadata (author, publication date) from content
