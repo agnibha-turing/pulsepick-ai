@@ -167,14 +167,21 @@ export function ArticleCard({ article }: ArticleCardProps) {
             </div>
             <span>{article.source}</span>
             <span>•</span>
-            <span>{new Date(article.date).toLocaleString(undefined, {
-              year: 'numeric',
-              month: 'numeric', 
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false
-            })}</span>
+            <span>{(function() {
+              // Ensure date string is treated as UTC if it doesn't include timezone info
+              let dateStr = article.date;
+              if (!dateStr.endsWith('Z') && !dateStr.includes('+')) {
+                dateStr = dateStr + 'Z';
+              }
+              return new Date(dateStr).toLocaleString(undefined, {
+                year: 'numeric',
+                month: 'numeric', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+              });
+            })()}</span>
           </div>
         </CardHeader>
         
@@ -284,14 +291,21 @@ export function ArticleCard({ article }: ArticleCardProps) {
               </div>
               <span>{article.source}</span>
               <span>•</span>
-              <span>{new Date(article.date).toLocaleString(undefined, {
-                year: 'numeric',
-                month: 'numeric', 
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-              })}</span>
+              <span>{(function() {
+                // Ensure date string is treated as UTC if it doesn't include timezone info
+                let dateStr = article.date;
+                if (!dateStr.endsWith('Z') && !dateStr.includes('+')) {
+                  dateStr = dateStr + 'Z';
+                }
+                return new Date(dateStr).toLocaleString(undefined, {
+                  year: 'numeric',
+                  month: 'numeric', 
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+                });
+              })()}</span>
             </div>
             <DialogTitle className="text-xl">{article.title}</DialogTitle>
           </DialogHeader>

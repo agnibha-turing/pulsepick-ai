@@ -13,6 +13,7 @@ from app.feeds.linkedin import LinkedInConnector
 from app.pipeline.processor import ArticleProcessor
 from app.core.config import settings
 from app.db.models import Industry, Article
+from app.db.utils import update_articles_timestamp
 
 
 # Configure logging
@@ -201,6 +202,10 @@ def update_all_relevance_scores():
 
         # Commit all changes
         db.commit()
+
+        # Update the last updated timestamp
+        update_articles_timestamp(db)
+
         logger.info(
             f"Successfully updated relevance scores for {count} articles")
         return count
@@ -227,6 +232,13 @@ def fetch_all_articles():
         job = fetch_google_news.s(industry=industry)
         result = job.apply_async()
         industry_jobs.append(result)
+
+    # Update the last updated timestamp
+    db = SessionLocal()
+    try:
+        update_articles_timestamp(db)
+    finally:
+        db.close()
 
     # Run 5 minutes after fetch completes
     update_all_relevance_scores.apply_async(countdown=300)

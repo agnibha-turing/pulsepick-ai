@@ -28,6 +28,12 @@ export interface DisplayArticle {
   url: string;
 }
 
+// Response interface from the backend
+export interface ArticleResponse {
+  articles: BackendArticle[];
+  last_updated: string;
+}
+
 const mockArticles: BackendArticle[] = [
   {
     id: 1,
@@ -164,7 +170,7 @@ const transformToDisplayArticle = (article: BackendArticle): DisplayArticle => {
   };
 };
 
-export const getArticles = async (filters: string[] = []): Promise<DisplayArticle[]> => {
+export const getArticles = async (filters: string[] = []): Promise<{ articles: DisplayArticle[], lastUpdated: string }> => {
   try {
     // Try to fetch from backend first
     let apiUrl = API_URL;
@@ -181,10 +187,15 @@ export const getArticles = async (filters: string[] = []): Promise<DisplayArticl
     
     // If the request was successful
     if (response.ok) {
-      const articles: BackendArticle[] = await response.json();
+      const data: ArticleResponse = await response.json();
       
       // Transform articles to display format
-      return articles.map(transformToDisplayArticle);
+      const displayArticles = data.articles.map(transformToDisplayArticle);
+      
+      return {
+        articles: displayArticles,
+        lastUpdated: data.last_updated
+      };
     } else {
       console.warn("Failed to fetch from backend API, falling back to mock data");
       throw new Error("API request failed");
@@ -207,6 +218,12 @@ export const getArticles = async (filters: string[] = []): Promise<DisplayArticl
     }
     
     // Transform mocks to display format
-    return filteredMocks.map(transformToDisplayArticle);
+    const displayArticles = filteredMocks.map(transformToDisplayArticle);
+    
+    // Return with the current time as lastUpdated for mock data
+    return {
+      articles: displayArticles,
+      lastUpdated: new Date().toISOString()
+    };
   }
 };

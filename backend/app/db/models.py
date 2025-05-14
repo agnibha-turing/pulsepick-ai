@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, Integer, ForeignKey, Text, Float, DateTim
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
+from datetime import datetime
 
 from app.db.base_class import Base
 from app.core.config import settings
@@ -65,3 +66,12 @@ class Article(Base):
 
     def __repr__(self):
         return f"<Article {self.title[:30]}...>"
+
+
+class SystemMetadata(Base):
+    key = Column(String(255), nullable=False, unique=True)
+    value = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SystemMetadata {self.key}>"

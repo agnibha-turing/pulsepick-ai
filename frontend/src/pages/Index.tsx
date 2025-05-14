@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ArticleCard } from "@/components/article-card";
@@ -28,7 +28,8 @@ import {
   Settings,
   SlidersHorizontal,
   PlusCircle,
-  MessageSquare
+  MessageSquare,
+  RefreshCw
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -54,29 +55,65 @@ const Index = () => {
   const [contentTypes, setContentTypes] = useState<string[]>(["Articles"]);
   const [timePeriod, setTimePeriod] = useState("7 Days");
   const [minRelevance, setMinRelevance] = useState([50]);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const { activePersona, setActivePersona, isPersonaActive } = usePersona();
   const { selectedArticles, selectedCount } = useSelectedArticles();
 
-  useEffect(() => {
-    const fetchArticles = async () => {
-      setLoading(true);
-      try {
-        const filters = [...activeFilters];
-        if (activeIndustry !== "All") {
-          filters.push(activeIndustry);
-        }
-        
-        const articlesData = await getArticles(filters);
-        setArticles(articlesData);
-      } catch (error) {
-        console.error("Error fetching articles:", error);
-      } finally {
-        setLoading(false);
+  const fetchArticles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const filters = [...activeFilters];
+      if (activeIndustry !== "All") {
+        filters.push(activeIndustry);
       }
-    };
-
-    fetchArticles();
+      
+      const result = await getArticles(filters);
+      setArticles(result.articles);
+      setLastUpdated(result.lastUpdated);
+    } catch (error) {
+      console.error("Error fetching articles:", error);
+      toast.error("Failed to load articles");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [activeFilters, activeIndustry]);
+
+  useEffect(() => {
+    fetchArticles();
+  }, [fetchArticles]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    toast.info("Refreshing articles...");
+    await fetchArticles();
+    toast.success("Articles refreshed successfully");
+  };
+
+  const formatLastUpdated = (timestamp: string) => {
+    try {
+      // Ensure timestamp is treated as UTC if it doesn't include timezone info
+      if (!timestamp.endsWith('Z') && !timestamp.includes('+')) {
+        timestamp = timestamp + 'Z';
+      }
+      
+      // Create date object (will automatically convert to local time zone)
+      const date = new Date(timestamp);
+      
+      console.log("Original timestamp:", timestamp);
+      console.log("Parsed date in local time:", date.toString());
+      
+      return new Intl.DateTimeFormat('en-US', { 
+        dateStyle: 'short', 
+        timeStyle: 'short',
+        hour12: false  // Use 24-hour format instead of AM/PM
+      }).format(date);
+    } catch (e) {
+      console.error("Error formatting timestamp:", e);
+      return 'Unknown';
+    }
+  };
 
   const toggleContentType = (type: string) => {
     setContentTypes(prev => 
@@ -208,8 +245,6 @@ const Index = () => {
 
       {/* Main content */}
       <div className="flex flex-1 container px-0 sm:px-4">
-        {/* Filter button for mobile - REMOVED since it conflicts with Generate Message FAB and is redundant with hamburger menu */}
-        
         {/* Mobile sidebar */}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
           <SheetContent side="left" className="w-[300px] sm:w-[400px] p-0 lg:hidden">
@@ -240,8 +275,23 @@ const Index = () => {
                   {activePersona.jobTitle && ` (${activePersona.jobTitle})`}
                 </p>
               )}
+              {lastUpdated && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Last updated (local): {formatLastUpdated(lastUpdated)}
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2"
+                onClick={handleRefresh}
+                disabled={loading || refreshing}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
               <PersonaInputCard className="w-auto" />
               <Button 
                 variant="outline" 

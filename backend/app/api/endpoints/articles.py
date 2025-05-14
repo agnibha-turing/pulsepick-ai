@@ -9,12 +9,13 @@ from app.db.models import Article, Industry
 from app.api.deps import get_db
 from app.pipeline.processor import ArticleProcessor
 from app.workers.tasks import fetch_all_articles, update_all_relevance_scores
+from app.db.utils import get_articles_timestamp
 
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[dict])
+@router.get("/", response_model=dict)
 def get_articles(
     db: Session = Depends(get_db),
     industry: Optional[str] = None,
@@ -132,10 +133,17 @@ def get_articles(
         }
         result.append(article_dict)
 
-    return result
+    # Get last updated timestamp
+    last_updated = get_articles_timestamp(db)
+
+    # Return articles with last_updated timestamp
+    return {
+        "articles": result,
+        "last_updated": last_updated
+    }
 
 
-@router.get("/search", response_model=List[dict])
+@router.get("/search", response_model=dict)
 def search_articles(
     q: str,
     db: Session = Depends(get_db),
@@ -190,7 +198,14 @@ def search_articles(
         }
         result.append(article_dict)
 
-    return result
+    # Get last updated timestamp
+    last_updated = get_articles_timestamp(db)
+
+    # Return articles with last_updated timestamp
+    return {
+        "articles": result,
+        "last_updated": last_updated
+    }
 
 
 @router.post("/fetch", response_model=dict)
