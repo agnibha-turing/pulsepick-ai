@@ -133,7 +133,7 @@ const Index = () => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Enhanced Header/Navbar */}
-      <header className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur-md shadow-sm">
+      <header className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur-md shadow-sm" style={{ isolation: 'isolate' }}>
         <div className="container flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
@@ -168,7 +168,7 @@ const Index = () => {
                   <NavigationMenuItem>
                     <NavigationMenuTrigger className="bg-transparent">Analyze</NavigationMenuTrigger>
                     <NavigationMenuContent>
-                      <ul className="grid gap-3 p-4 w-[400px] md:w-[500px] grid-cols-2">
+                      <ul className="grid gap-3 p-4 w-[400px] md:w-[500px] lg:w-[600px] grid-cols-2">
                         {["Market Trends", "Competitor Analysis", "Industry Reports", "Custom Insights"].map((item) => (
                           <li key={item} className="row-span-1">
                             <NavigationMenuLink asChild>
@@ -221,7 +221,7 @@ const Index = () => {
       </header>
 
       {/* Industry Tabs - Sticky below header */}
-      <div className="sticky top-16 z-10 bg-background/95 backdrop-blur-sm border-b">
+      <div className="sticky top-16 z-20 border-b translucent-navbar shadow-sm">
         <div className="container px-4 py-2 overflow-x-auto scrollbar-none">
           <Tabs 
             defaultValue={activeIndustry} 
@@ -233,7 +233,11 @@ const Index = () => {
                 <TabsTrigger 
                   key={industry}
                   value={industry} 
-                  className="px-4 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+                  className="px-4 py-2 rounded-md border border-transparent transition-all duration-200
+                  hover:bg-background/60 hover:border-border/30
+                  data-[state=active]:bg-primary data-[state=active]:text-primary-foreground
+                  data-[state=active]:shadow-sm data-[state=active]:border-transparent
+                  outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 !ring-0"
                 >
                   {industry}
                 </TabsTrigger>
