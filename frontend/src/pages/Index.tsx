@@ -5,7 +5,7 @@ import { ArticleCard } from "@/components/article-card";
 import { FilterChips } from "@/components/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getArticles, DisplayArticle, batchScoreArticles } from "@/services/article-service";
+import { getArticles, DisplayArticle, batchScoreArticles, startBatchScoreArticles, getBatchScoreStatus } from "@/services/article-service";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -84,9 +84,14 @@ const emptyStateVariants = {
   }
 };
 
+// Extended DisplayArticle interface to include personalization properties
+interface EnhancedArticle extends DisplayArticle {
+  personaScore?: number;
+}
+
 const Index = () => {
   const [articles, setArticles] = useState<DisplayArticle[]>([]);
-  const [personalizedArticles, setPersonalizedArticles] = useState<DisplayArticle[]>([]);
+  const [personalizedArticles, setPersonalizedArticles] = useState<EnhancedArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPersonalized, setLoadingPersonalized] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -114,6 +119,13 @@ const Index = () => {
   // Add a new state for tracking when personalization was last done
   const [lastPersonalizationTime, setLastPersonalizationTime] = useState<number | null>(null);
   const [lastPersonaId, setLastPersonaId] = useState<string | null>(null);
+
+  // New state for async processing
+  const [scoringTaskId, setScoringTaskId] = useState<string | null>(null);
+  const [scoringProgress, setScoringProgress] = useState<number>(0);
+  const [progressTotal, setProgressTotal] = useState<number>(0);
+  const [progressProcessed, setProgressProcessed] = useState<number>(0);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
 
   // Fetch regular articles (recency-based sorting)
   const fetchArticles = useCallback(async (industry: string = activeIndustry) => {
@@ -200,7 +212,46 @@ const Index = () => {
     }
   }, [fetchArticles, loadedIndustries]);
 
-  // Personalize articles using LLM
+  // New function to handle incremental updates from batch scoring
+  const updateArticlesWithScores = useCallback((
+    articles: DisplayArticle[], 
+    scores: Array<{ id: number, relevance_score: number }>
+  ): EnhancedArticle[] => {
+    // Create a map of id -> score for quick lookup
+    const scoreMap: { [id: string]: number } = {};
+    scores.forEach(item => {
+      scoreMap[item.id.toString()] = item.relevance_score;
+    });
+    
+    // Create a copy of articles with scores applied
+    const scoredArticles = articles.map(article => {
+      // Only update articles that have been scored
+      if (scoreMap[article.id]) {
+        return {
+          ...article,
+          personaScore: scoreMap[article.id]
+        } as EnhancedArticle;
+      }
+      // Keep existing personaScore or use default
+      const enhanced = article as EnhancedArticle;
+      return {
+        ...article,
+        personaScore: enhanced.personaScore || 0.5
+      } as EnhancedArticle;
+    });
+    
+    // Remove duplicates (by ID)
+    const uniqueArticles = Array.from(
+      new Map(scoredArticles.map(article => [article.id, article])).values()
+    );
+    
+    // Sort by personalization score (descending)
+    uniqueArticles.sort((a, b) => (b.personaScore || 0) - (a.personaScore || 0));
+    
+    return uniqueArticles;
+  }, []);
+
+  // Updated version with async processing
   const personalizeArticles = useCallback(async () => {
     if (!isPersonaActive || !activePersona) return;
     
@@ -222,41 +273,30 @@ const Index = () => {
         new Set(allTabsArticles.map(article => article.id))
       );
       
-      // Get personalization scores for all articles
-      const scoreMap = await batchScoreArticles(uniqueArticleIds, activePersona);
+      // Clear personalized articles during processing
+      setPersonalizedArticles([]);
       
-      // Create a copy of all articles with scores applied
-      const scoredArticles = allTabsArticles.map(article => ({
-        ...article,
-        personaScore: scoreMap[article.id] || 0.5  // Use default if no score
-      }));
+      // Start async batch scoring
+      const taskResult = await startBatchScoreArticles(uniqueArticleIds, activePersona);
       
-      // Remove duplicates (by ID)
-      const uniqueArticles = Array.from(
-        new Map(scoredArticles.map(article => [article.id, article])).values()
-      );
+      // Store task ID for polling
+      setScoringTaskId(taskResult.taskId);
+      setProgressTotal(taskResult.totalArticles);
+      setProgressProcessed(0);
+      setScoringProgress(0);
       
-      // Sort by personalization score (descending)
-      uniqueArticles.sort((a, b) => (b.personaScore || 0) - (a.personaScore || 0));
+      // Start polling for updates
+      setIsPolling(true);
       
-      // Update state with personalized articles
-      setPersonalizedArticles(uniqueArticles);
+      // Track that we've personalized for this persona
+      setLastPersonaId(activePersona.recipientName);
+      setLastPersonalizationTime(Date.now());
       setPersonaApplied(true);
       setLlmEnhanced(true);
-      
-      // Track when this personalization was done and for which persona
-      setLastPersonalizationTime(Date.now());
-      setLastPersonaId(activePersona.recipientName);
-      
-      toast.success("Content personalized successfully", {
-        description: `Found ${uniqueArticles.length} articles ranked for ${activePersona.recipientName}`,
-        duration: 3000
-      });
       
     } catch (error) {
       console.error("Error personalizing articles:", error);
       toast.error("Failed to personalize content");
-    } finally {
       setIsBatchPersonalizing(false);
     }
   }, [
@@ -266,68 +306,67 @@ const Index = () => {
     loadedIndustries, 
     fetchAllIndustryTabs
   ]);
-
-  // Personalize articles when persona changes
+  
+  // Add polling effect
   useEffect(() => {
-    // Only personalize if:
-    // 1. We have a persona active AND
-    // 2. We have NOT personalized for this specific persona yet
-    // 3. AND we're not already in the process of personalizing
-    const needsPersonalization = 
-      isPersonaActive && 
-      activePersona?.recipientName &&
-      lastPersonaId !== activePersona.recipientName && 
-      !isBatchPersonalizing;
+    let pollInterval: NodeJS.Timeout | null = null;
     
-    if (needsPersonalization) {
-      // Only perform personalization once per persona
-      personalizeArticles();
-    }
-  }, [
-    isPersonaActive, 
-    activePersona, 
-    lastPersonaId, 
-    isBatchPersonalizing,
-    personalizeArticles
-  ]);
-
-  // Switch to personalized tab when persona is activated
-  useEffect(() => {
-    if (isPersonaActive && activePersona?.recipientName) {
-      setActiveTab("Personalized");
+    const pollForResults = async () => {
+      if (!scoringTaskId || !isPolling) return;
       
-      // Only show toast if we're applying a new persona (not on tab switches)
-      if (lastPersonaId !== activePersona.recipientName) {
-        toast.info(
-          `Articles personalized for ${activePersona.recipientName}`,
-          {
-            description: "Switch between tabs to compare personalized and regular views",
-            duration: 3000
+      try {
+        const status = await getBatchScoreStatus(scoringTaskId);
+        
+        // Update progress indicators
+        setScoringProgress(status.progressPercentage);
+        setProgressProcessed(status.processed);
+        
+        // Check if processing is complete
+        if (status.status === "completed") {
+          // Only update articles when processing is completely finished
+          if (status.results && status.results.length > 0) {
+            const updatedArticles = updateArticlesWithScores(allTabsArticles, status.results);
+            setPersonalizedArticles(updatedArticles);
           }
-        );
+          
+          setIsPolling(false);
+          setIsBatchPersonalizing(false);
+          setScoringTaskId(null);
+          
+          toast.success("Content personalized successfully", {
+            description: `Found ${status.results.length} articles ranked for ${activePersona?.recipientName}`,
+            duration: 3000
+          });
+        }
+      } catch (error) {
+        console.error("Error polling for batch status:", error);
+        setIsPolling(false);
+        setIsBatchPersonalizing(false);
       }
+    };
+    
+    if (isPolling && scoringTaskId) {
+      // Initial poll immediately
+      pollForResults();
+      
+      // Set up polling interval - reduce to 1 second for faster updates
+      pollInterval = setInterval(pollForResults, 1000);
     }
-  }, [isPersonaActive, activePersona?.recipientName, lastPersonaId]);
+    
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [isPolling, scoringTaskId, allTabsArticles, activePersona, updateArticlesWithScores]);
 
-  // Handle tab change without triggering personalization
+  // Simplified tab change handler - just switch tabs, no personalization triggering
   const handleTabChange = (value: string) => {
     if (value === "Personalized") {
-      // Simply switch to the personalized tab without re-personalizing
+      // Simply switch to the personalized tab
       setActiveTab("Personalized");
-      
-      // Only personalize if we've never personalized for this persona before
-      // This should be rare since the persona-change useEffect should handle this
-      const neverPersonalizedForCurrentPersona = 
-        isPersonaActive && 
-        activePersona?.recipientName &&
-        lastPersonaId !== activePersona.recipientName && 
-        !isBatchPersonalizing;
-      
-      if (neverPersonalizedForCurrentPersona) {
-        personalizeArticles();
-      }
     } else {
-      // If switching to a regular industry tab
+      // Switch to a regular industry tab
       setActiveTab(value);
       setActiveIndustry(value);
     }
@@ -345,6 +384,53 @@ const Index = () => {
       fetchAllIndustryTabs();
     }
   }, [fetchAllIndustryTabs, isLoadingAllTabs, loadedIndustries]);
+
+  // Start personalization in the background as soon as persona changes
+  useEffect(() => {
+    // Only personalize if:
+    // 1. We have a persona active AND
+    // 2. We have NOT personalized for this specific persona yet
+    // 3. AND we're not already in the process of personalizing
+    const shouldStartPersonalization = 
+      isPersonaActive && 
+      activePersona?.recipientName &&
+      lastPersonaId !== activePersona.recipientName && 
+      !isBatchPersonalizing &&
+      !isPolling;
+    
+    if (shouldStartPersonalization) {
+      // Start personalization immediately, regardless of current tab
+      personalizeArticles();
+      
+      // Show notification that personalization has started
+      toast.info(
+        `Personalizing content for ${activePersona.recipientName}`,
+        {
+          description: "Content is being personalized in the background. Switch to the Personalized tab to see results.",
+          duration: 5000
+        }
+      );
+    }
+  }, [
+    isPersonaActive, 
+    activePersona, 
+    lastPersonaId, 
+    isBatchPersonalizing,
+    isPolling,
+    personalizeArticles
+  ]);
+
+  // Switch to personalized tab ONLY when persona is initially activated
+  useEffect(() => {
+    // This should run only when a persona is first applied
+    const isNewPersona = isPersonaActive && 
+                        activePersona?.recipientName && 
+                        (!lastPersonaId || lastPersonaId !== activePersona.recipientName);
+    
+    if (isNewPersona) {
+      setActiveTab("Personalized");
+    }
+  }, [isPersonaActive, activePersona?.recipientName, lastPersonaId]);
 
   // Handle refresh button click
   const handleRefresh = async () => {
@@ -442,6 +528,54 @@ const Index = () => {
     
     console.log("Selected articles:", selectedArticles);
     console.log("Active persona:", activePersona);
+  };
+
+  // Add a progress indicator component
+  const renderProgressIndicator = () => {
+    // Show progress indicator when in personalized view and either loading or polling
+    if (!(isPersonalizedView && (isLoading || isPolling))) return null;
+    
+    return (
+      <div className="mb-6 max-w-3xl mx-auto bg-card/80 border rounded-lg p-5 shadow-lg backdrop-blur-md transition-all duration-300">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-2">
+          <div className="flex items-center gap-3">
+            <div className="bg-primary/20 p-2.5 rounded-full">
+              <User className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <p className="font-medium text-sm">
+                Personalizing for <span className="font-semibold">{activePersona?.recipientName}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">Analyzing article relevance</p>
+            </div>
+          </div>
+          <Badge variant="secondary" className="bg-primary/10 text-primary font-medium px-3 py-1 self-start sm:self-auto">
+            {progressProcessed > 0 ? `${progressProcessed}/${progressTotal} articles` : 'Starting...'}
+          </Badge>
+        </div>
+        
+        <div className="mt-4 space-y-2">
+          <div className="relative w-full h-2.5 bg-primary/10 rounded-full overflow-hidden">
+            <div 
+              className="absolute left-0 top-0 h-full bg-primary transition-all duration-300 rounded-full"
+              style={{ width: `${scoringProgress}%` }}
+            ></div>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <p className="text-xs text-muted-foreground flex items-center">
+              <RefreshCw className="h-3 w-3 mr-1.5 animate-spin text-primary" />
+              {scoringProgress > 0 
+                ? `${scoringProgress}% complete` 
+                : 'Initializing...'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Articles will appear when complete
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -609,15 +743,17 @@ const Index = () => {
                   : (activeTab === "All" ? "All Industries" : activeTab)}
               </h1>
               {isPersonaActive && activePersona?.recipientName && activeTab === "Personalized" && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  Content ranked for <span className="font-medium">{activePersona.recipientName}</span>
-                  {activePersona.jobTitle && ` (${activePersona.jobTitle})`}
+                <div className="text-sm text-muted-foreground mt-1 flex items-center flex-wrap">
+                  <span>
+                    Content ranked for <span className="font-medium">{activePersona.recipientName}</span>
+                    {activePersona.jobTitle && ` (${activePersona.jobTitle})`}
+                  </span>
                   {personaApplied && (
                     <Badge variant="outline" className="ml-2 bg-primary/10 text-primary text-xs">
                       AI Personalized
                     </Badge>
                   )}
-                </p>
+                </div>
               )}
               {lastUpdated && (
                 <p className="text-xs text-muted-foreground mt-1">
@@ -661,29 +797,34 @@ const Index = () => {
           </div>
           
           {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[...Array(6)].map((_, i) => (
-                <div key={i} className="bg-card rounded-lg p-6 space-y-3 border">
-                  <div className="flex justify-between items-start">
-                    <Skeleton className="h-6 w-1/3" />
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                  </div>
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-4 w-full" />
-                  <div className="flex gap-2">
-                    <Skeleton className="h-6 w-16 rounded-full" />
-                    <Skeleton className="h-6 w-16 rounded-full" />
-                  </div>
-                  <div className="pt-4 flex justify-between">
-                    <div className="flex gap-2">
-                      <Skeleton className="h-9 w-9 rounded-md" />
-                      <Skeleton className="h-9 w-9 rounded-md" />
+            <>
+              {/* Show progress indicator during loading in personalized view */}
+              {isPersonalizedView && renderProgressIndicator()}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="bg-card rounded-lg p-6 space-y-3 border">
+                    <div className="flex justify-between items-start">
+                      <Skeleton className="h-6 w-1/3" />
+                      <Skeleton className="h-5 w-16 rounded-full" />
                     </div>
-                    <Skeleton className="h-9 w-20 rounded-md" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-4 w-full" />
+                    <div className="flex gap-2">
+                      <Skeleton className="h-6 w-16 rounded-full" />
+                      <Skeleton className="h-6 w-16 rounded-full" />
+                    </div>
+                    <div className="pt-4 flex justify-between">
+                      <div className="flex gap-2">
+                        <Skeleton className="h-9 w-9 rounded-md" />
+                        <Skeleton className="h-9 w-9 rounded-md" />
+                      </div>
+                      <Skeleton className="h-9 w-20 rounded-md" />
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           ) : (
             <AnimatePresence mode="wait">
               <motion.div
@@ -705,13 +846,38 @@ const Index = () => {
                     </p>
                   </motion.div>
                 ) : (
-                  <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" variants={containerVariants}>
-                    {displayArticles.map(article => (
-                      <motion.div key={article.id} variants={itemVariants}>
-                        <ArticleCard article={article} />
-                      </motion.div>
-                    ))}
-                  </motion.div>
+                  <>
+                    {/* Progress indicator - show in both loading and when articles are being displayed */}
+                    {isPersonalizedView && isPolling && renderProgressIndicator()}
+                    
+                    {/* Articles grid */}
+                    <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" variants={containerVariants}>
+                      {displayArticles.map(article => {
+                        // Cast to EnhancedArticle to access personaScore
+                        const enhancedArticle = article as EnhancedArticle;
+                        
+                        return (
+                          <motion.div 
+                            key={article.id} 
+                            variants={itemVariants}
+                            initial="hidden"
+                            animate="visible"
+                            transition={{ 
+                              type: "spring", 
+                              stiffness: 200, 
+                              damping: 25
+                            }}
+                            className={isPersonalizedView && enhancedArticle.personaScore ? 
+                              `ring-1 ring-primary/10 ${enhancedArticle.personaScore > 0.7 ? 'ring-2 ring-primary/20' : ''}` : 
+                              undefined
+                            }
+                          >
+                            <ArticleCard article={article} />
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+                  </>
                 )}
               </motion.div>
             </AnimatePresence>

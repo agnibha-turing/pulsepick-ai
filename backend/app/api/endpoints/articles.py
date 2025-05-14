@@ -3,13 +3,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 import random  # For generating demo images
+import json
 # Updated import for pgvector 0.4.1
 
 from app.db.models import Article, Industry
 from app.api.deps import get_db
 from app.pipeline.processor import ArticleProcessor
-from app.workers.tasks import fetch_all_articles, update_all_relevance_scores
+from app.workers.tasks import fetch_all_articles, update_all_relevance_scores, batch_score_articles_async
 from app.db.utils import get_articles_timestamp, update_articles_timestamp
+from app.core.redis import get_redis_client
 
 
 router = APIRouter()
@@ -236,6 +238,8 @@ def trigger_update_scores():
     }
 
 
+# This endpoint is no longer actively used. The application now uses the batch async
+# endpoints (batch-score-async and batch-score-status) for personalization instead.
 @router.post("/", response_model=dict)
 def get_articles_with_persona(
     db: Session = Depends(get_db),
@@ -480,3 +484,81 @@ def batch_score_articles(
         "persona_applied": True,
         "llm_enhanced": True
     }
+
+
+@router.post("/batch-score-async", response_model=dict)
+def batch_score_articles_async_endpoint(
+    db: Session = Depends(get_db),
+    request_data: dict = Body(...),
+):
+    """
+    Score a batch of articles asynchronously for a specific persona using LLM.
+
+    This endpoint accepts a list of article IDs and a persona,
+    initiates an async task, and returns a task ID for polling status.
+    """
+    article_ids = request_data.get("article_ids", [])
+    persona = request_data.get("persona")
+
+    if not article_ids or not persona:
+        raise HTTPException(
+            status_code=400, detail="Article IDs and persona are required")
+
+    # Start the async task
+    task = batch_score_articles_async.delay(article_ids, persona)
+
+    # Return the task ID for polling
+    return {
+        "task_id": task.id,
+        "status": "processing",
+        "total_articles": len(article_ids)
+    }
+
+
+@router.get("/batch-score-status/{task_id}", response_model=dict)
+def get_batch_score_status(
+    task_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get the status of an async batch scoring task.
+
+    Returns the current progress and any results available so far.
+    """
+    redis_client = get_redis_client()
+
+    # Check if task exists
+    if not redis_client.exists(f"article_scoring:{task_id}"):
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Get task data
+    task_data = redis_client.hgetall(f"article_scoring:{task_id}")
+
+    # Convert byte strings to regular strings
+    task_data = {k.decode('utf-8'): v.decode('utf-8')
+                 for k, v in task_data.items()}
+
+    # Parse results JSON
+    if "results" in task_data:
+        try:
+            task_data["results"] = json.loads(task_data["results"])
+        except:
+            task_data["results"] = []
+
+    # Convert numeric values
+    if "total" in task_data:
+        task_data["total"] = int(task_data["total"])
+    if "processed" in task_data:
+        task_data["processed"] = int(task_data["processed"])
+
+    # Calculate progress percentage
+    if "total" in task_data and "processed" in task_data and task_data["total"] > 0:
+        task_data["progress_percentage"] = round(
+            (task_data["processed"] / task_data["total"]) * 100)
+    else:
+        task_data["progress_percentage"] = 0
+
+    # Update last_updated timestamp
+    task_data["last_updated"] = get_articles_timestamp(db)
+
+    return task_data

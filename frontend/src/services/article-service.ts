@@ -334,3 +334,75 @@ export const batchScoreArticles = async (
     return defaultScoreMap;
   }
 };
+
+/**
+ * Start an asynchronous batch scoring job for a list of articles
+ */
+export const startBatchScoreArticles = async (
+  articleIds: string[],
+  persona: Persona
+): Promise<{ taskId: string, status: string, totalArticles: number }> => {
+  try {
+    const response = await fetch(`${API_URL}/batch-score-async`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        article_ids: articleIds,
+        persona: persona
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error("Failed to start batch scoring");
+    }
+    
+    const data = await response.json();
+    
+    return {
+      taskId: data.task_id,
+      status: data.status,
+      totalArticles: data.total_articles
+    };
+  } catch (error) {
+    console.error("Error starting batch scoring:", error);
+    throw error;
+  }
+};
+
+/**
+ * Check the status of a batch scoring job and get incremental results
+ */
+export const getBatchScoreStatus = async (
+  taskId: string
+): Promise<{
+  status: string;
+  processed: number;
+  total: number;
+  progressPercentage: number;
+  results: Array<{ id: number, relevance_score: number }>;
+  lastUpdated: string;
+}> => {
+  try {
+    const response = await fetch(`${API_URL}/batch-score-status/${taskId}`);
+    
+    if (!response.ok) {
+      throw new Error("Failed to get batch scoring status");
+    }
+    
+    const data = await response.json();
+    
+    return {
+      status: data.status || "unknown",
+      processed: data.processed || 0,
+      total: data.total || 0,
+      progressPercentage: data.progress_percentage || 0,
+      results: data.results || [],
+      lastUpdated: data.last_updated
+    };
+  } catch (error) {
+    console.error("Error getting batch scoring status:", error);
+    throw error;
+  }
+};

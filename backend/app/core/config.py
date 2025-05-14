@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     FETCH_INTERVAL_MINUTES: int = 30
     ARTICLE_FETCH_LIMIT: int = 100
 
+    # Redis settings - use the same host as CELERY_BROKER_URL for consistency
+    @property
+    def REDIS_URL(self) -> str:
+        # Extract host from CELERY_BROKER_URL to ensure they're the same
+        # This handles both local dev (localhost) and Docker (redis service name)
+        return self.CELERY_BROKER_URL
+
     # Look for .env in parent directory (project root) when running locally
     # When in Docker, environment variables are passed directly
     model_config = SettingsConfigDict(

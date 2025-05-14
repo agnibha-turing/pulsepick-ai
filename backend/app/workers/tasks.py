@@ -14,6 +14,8 @@ from app.pipeline.processor import ArticleProcessor
 from app.core.config import settings
 from app.db.models import Industry, Article
 from app.db.utils import update_articles_timestamp
+from app.core.redis import get_redis_client
+import json
 
 
 # Configure logging
@@ -244,3 +246,108 @@ def fetch_all_articles():
     update_all_relevance_scores.apply_async(countdown=300)
 
     return "Scheduled balanced article fetch tasks"
+
+
+@celery_app.task(bind=True)
+def batch_score_articles_async(self, article_ids, persona):
+    """
+    Process and score articles in batches asynchronously.
+
+    This task scores articles based on persona relevance in parallel batches,
+    with progress tracking and incremental result delivery.
+
+    Args:
+        article_ids: List of article IDs to score
+        persona: Persona data for personalization
+
+    Returns:
+        task_id: The ID of this task for status checking
+    """
+    db = SessionLocal()
+    redis_client = get_redis_client()
+    task_id = self.request.id
+
+    try:
+        logger.info(
+            f"Starting async batch scoring for {len(article_ids)} articles. Task ID: {task_id}")
+
+        # Initialize progress in Redis
+        redis_client.hset(
+            f"article_scoring:{task_id}",
+            mapping={
+                "total": len(article_ids),
+                "processed": 0,
+                "status": "processing",
+                "results": json.dumps([])
+            }
+        )
+        # Expire after 1 hour
+        redis_client.expire(f"article_scoring:{task_id}", 3600)
+
+        # Create processor for personalized scoring
+        processor = ArticleProcessor(db)
+
+        # Batch size for processing
+        BATCH_SIZE = 5
+
+        # Split into batches
+        batches = [article_ids[i:i + BATCH_SIZE]
+                   for i in range(0, len(article_ids), BATCH_SIZE)]
+
+        # Process batches
+        all_results = []
+        processed_count = 0
+
+        for batch in batches:
+            # Get articles for this batch
+            batch_articles = db.query(Article).filter(
+                Article.id.in_(batch)).all()
+            batch_results = []
+
+            # Score each article in the batch
+            for article in batch_articles:
+                score = processor.calculate_combined_relevance_score(
+                    article, persona)
+
+                result = {
+                    "id": article.id,
+                    "relevance_score": score
+                }
+                batch_results.append(result)
+                all_results.append(result)
+
+                # Update progress after each article
+                processed_count += 1
+                redis_client.hset(
+                    f"article_scoring:{task_id}", "processed", processed_count)
+
+                # Update progress percentage for the Celery task
+                self.update_state(
+                    state='PROGRESS',
+                    meta={'processed': processed_count,
+                          'total': len(article_ids)}
+                )
+
+            # Update results in Redis after each batch
+            redis_client.hset(
+                f"article_scoring:{task_id}",
+                "results",
+                json.dumps(all_results)
+            )
+
+        # Mark as completed
+        redis_client.hset(f"article_scoring:{task_id}", "status", "completed")
+
+        logger.info(f"Completed async batch scoring for task {task_id}")
+        return {"task_id": task_id, "status": "completed", "scored_count": len(all_results)}
+
+    except Exception as e:
+        logger.error(f"Error in batch scoring task: {e}")
+        # Mark as failed
+        redis_client.hset(f"article_scoring:{task_id}", "status", "failed")
+        redis_client.hset(f"article_scoring:{task_id}", "error", str(e))
+
+        raise
+
+    finally:
+        db.close()
