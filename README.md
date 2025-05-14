@@ -1,17 +1,48 @@
 # PulsePick AI
 
-PulsePick AI is a tool for sales and marketing professionals to discover and share relevant AI-related content with their clients and prospects.
+PulsePick AI is a tool for sales and marketing professionals to discover, curate, and share relevant AI-related content with their clients and prospects.
 
 ## Features
 
-- 🔍 Automatic content discovery from Google News and NewsAPI
-- 🧠 AI-powered summarization and industry classification (BFSI, Retail, Healthcare, etc.)
-- 🔎 Semantic search using vector embeddings (find content similar to your query)
-- 📊 Relevance scoring based on recency and topic matching
-- 🔄 Scheduled content ingestion with customizable intervals
+- 🔍 **Content Discovery**: Automatic content discovery from Google News and NewsAPI
+- 🧠 **AI-powered Processing**: Summarization, classification, and keyword extraction
+- 👤 **Persona Management**: Create recipient personas with personal and professional details
+- 🔎 **Content Selection**: Choose single or multiple articles to share with prospects
+- ✉️ **Personalized Messaging**: Generate platform-specific content tailored to recipients
+- 📊 **Intelligent Ranking**: Content relevance scoring based on multiple factors
+
+## Key Components
+
+### Persona-Aware Messaging
+
+Create personalized communications by:
+
+- Defining recipient profiles (name, job title, company)
+- Setting conversation context for continuity
+- Specifying personality traits to adjust tone and style
+- Generating platform-specific content (Email, LinkedIn, Twitter, Slack)
+
+### Multi-Platform Content Sharing
+
+Share valuable insights across multiple channels:
+
+- Professional emails with subject lines and formal structure
+- LinkedIn posts with industry-relevant hashtags
+- Twitter/X posts optimized for character limits
+- Slack messages with appropriate formatting
+
+### Smart Content Curation
+
+Efficiently manage your content sharing:
+
+- Select multiple articles simultaneously
+- Preview generated messages before sharing
+- Regenerate content until it matches your needs
+- Copy content directly to clipboard
 
 ## Tech Stack
 
+- **Frontend**: React, TypeScript, Vite, Tailwind CSS, shadcn/ui
 - **Backend**: FastAPI, SQLAlchemy, Postgres+pgvector, Celery, OpenAI
 - **Data Sources**: Google News RSS, NewsAPI.org, LinkedIn (coming soon)
 - **Infrastructure**: Docker, Redis
@@ -58,84 +89,78 @@ PulsePick AI is a tool for sales and marketing professionals to discover and sha
    docker-compose exec backend alembic upgrade head
    ```
 
-6. The API is now available at http://localhost:8000
+6. The application is now available at:
+
+   - Frontend: http://localhost:5173
+   - Backend API: http://localhost:8000
    - API docs: http://localhost:8000/docs
 
-### Manually Trigger Content Fetching
+## Component Architecture
+
+```
+                            ┌─────────────────────┐
+                            │   React Frontend    │
+                            │    Components       │
+                            ├─────────────────────┤
+                            │ - Persona Input     │
+                            │ - Article Selection │
+                            │ - Message Dialog    │
+                            └──────────┬──────────┘
+                                       │
+                                       ▼
+┌───────────────────┐            ┌─────────────┐
+│  Context Providers │◄──────────┤  Services   │
+│  - Persona         │           │ - Article   │
+│  - SelectedArticles│           │ - Message   │
+└───────────────────┘            └──────┬──────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────┐
+│                     Backend API                       │
+├──────────────────────────────────────────────────────┤
+│ - Article Endpoints (/api/articles)                  │
+│ - Message Generation (/api/messages/generate)        │
+└────────────────────────┬─────────────────────────────┘
+                         │
+                         ▼
+┌───────────────────────────────────────────────────────┐
+│  Processing Pipeline                                   │
+├───────────────────────────────────────────────────────┤
+│ - Content Fetching (RSS, NewsAPI)                     │
+│ - AI Processing (OpenAI API)                          │
+│   - Summarization                                     │
+│   - Classification                                    │
+│   - Personalized Message Generation                   │
+└───────────────────────────────────────────────────────┘
+```
+
+## Development
+
+### Frontend
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/articles/fetch
+cd frontend
+npm install
+npm run dev
 ```
 
-## API Usage
-
-### Get Recent Articles
+### Backend
 
 ```bash
-# Get latest articles
-curl http://localhost:8000/api/v1/articles/
-
-# Filter by industry
-curl http://localhost:8000/api/v1/articles/?industry=bfsi
-
-# Paginate results
-curl http://localhost:8000/api/v1/articles/?limit=10&offset=20
-
-# Sort by relevance
-curl http://localhost:8000/api/v1/articles/?sort_by=relevance_score
-```
-
-### Search Articles
-
-```bash
-# Semantic search
-curl http://localhost:8000/api/v1/articles/search?q=generative%20ai%20fintech
-
-# Combine search with industry filter
-curl http://localhost:8000/api/v1/articles/search?q=generative%20ai%20fintech&industry=bfsi
-```
-
-## Architecture
-
-```
-                 ┌─────────────┐      scheduled      ┌────────────────┐
-                 │  Celery /   │ ───────────────────>│ Feed Connectors │
-                 │  Celery Beat│                     └────────────────┘
-                 └─────────────┘                            │
-                       ^                                     │ raw articles
-                       │                                     ▼
-                worker queue                        ┌─────────────────────┐
-              (Redis / RabbitMQ)                    │ Processing Pipeline │
-                                                    ├─────────────────────┤
-                                                    │ 1. Deduplicate      │
-                                                    │ 2. Summarise (LLM)  │
-                                                    │ 3. Classify (BFSI…) │
-                                                    │ 4. Vector Embedding │
-                                                    └─────────┬───────────┘
-                                                              │
-                Postgres + pgvector                           │
-        ┌───────────────────────────────────────────────────┐▼────────────────────┐
-        │  articles(id, title, url, summary, embeddings, industry)                │
-        │  sources(id, name, type)                                                │
-        └──────────────────────────────────┬────────────────────────────────────────┘
-                                           │
-                                           ▼
-                                  ┌─────────────────┐
-                                  │  REST / GraphQL │
-                                  │  FastAPI svc    │
-                                  └─────────────────┘
-                                           │
-                                           ▼
-                                  React / Next.js UI
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
 
 ## Future Development
 
-- ⬆️ LinkedIn integration
-- 📣 Twitter/X integration
-- 📱 Mobile-friendly web app
-- 📤 Email digests
-- 🔗 Slack/Teams integration
+- ⬆️ LinkedIn direct posting integration
+- 📣 Twitter/X direct posting
+- 📱 Mobile application
+- 📤 Email digests and scheduling
+- 🔗 Slack/Teams direct integration
 
 ## License
 
