@@ -387,8 +387,22 @@ export const getBatchScoreStatus = async (
   try {
     const response = await fetch(`${API_URL}/batch-score-status/${taskId}`);
     
+    if (response.status === 404) {
+      console.warn(`Task ${taskId} not found - it may have expired from Redis`);
+      // Return a graceful response when task is not found
+      return {
+        status: "expired",
+        processed: 0,
+        total: 0,
+        progressPercentage: 0,
+        results: [],
+        lastUpdated: new Date().toISOString()
+      };
+    }
+    
     if (!response.ok) {
-      throw new Error("Failed to get batch scoring status");
+      console.error(`Failed to get batch scoring status: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to get batch scoring status: ${response.status} ${response.statusText}`);
     }
     
     const data = await response.json();

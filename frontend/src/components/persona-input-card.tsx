@@ -192,7 +192,11 @@ export function PersonaInputCard({
     }
 
     setIsApplying(true);
-    toast.info(`Personalizing content for ${persona.recipientName}...`);
+    // Change the toast message to be more specific about what's happening
+    toast.info(`Applying persona: ${persona.recipientName}`, {
+      description: "Setting up persona profile",
+      duration: 2000
+    });
 
     // Update context
     setActivePersona(persona);
@@ -208,7 +212,10 @@ export function PersonaInputCard({
     }
     
     setTimeout(() => {
-      toast.success("Persona applied successfully");
+      toast.success("Persona profile applied", {
+        description: "Content personalization will start shortly",
+        duration: 3000
+      });
       setIsApplying(false);
       handleOpenChange(false);
     }, 500);
@@ -311,7 +318,10 @@ export function PersonaInputCard({
   const handleQuickApplyPersona = (selected: Persona) => {
     setQuickSelectOpen(false);
     setIsApplying(true);
-    toast.info(`Applying ${selected.recipientName} persona...`);
+    toast.info(`Applying persona: ${selected.recipientName}`, {
+      description: "Setting up persona profile",
+      duration: 2000
+    });
     
     // Update context
     setActivePersona(selected);
@@ -327,7 +337,10 @@ export function PersonaInputCard({
     }
     
     setTimeout(() => {
-      toast.success("Persona applied successfully");
+      toast.success("Persona profile applied", {
+        description: "Content personalization will start shortly",
+        duration: 3000
+      });
       setIsApplying(false);
     }, 500);
   };

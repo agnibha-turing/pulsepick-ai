@@ -271,15 +271,16 @@ const Index = () => {
     setIsBatchPersonalizing(true);
     
     try {
+      // Show an initial toast indicating process is starting
+      toast.info("Starting personalization...", {
+        description: "Preparing to analyze content relevance for your persona",
+        duration: 3000
+      });
+      
       // Make sure we have articles from all tabs
       if (allTabsArticles.length === 0 || loadedIndustries.size < 2) {
         await fetchAllIndustryTabs();
       }
-      
-      toast.info("Personalizing content...", {
-        description: "Using AI to find the most relevant articles for your persona",
-        duration: 5000
-      });
       
       // Get the IDs of all the unique articles
       const uniqueArticleIds = Array.from(
@@ -330,6 +331,27 @@ const Index = () => {
       try {
         const status = await getBatchScoreStatus(scoringTaskId);
         
+        // Special handling for expired or failed tasks
+        if (status.status === "expired" || status.status === "failed") {
+          console.warn(`Task ${scoringTaskId} ${status.status}`);
+          setIsPolling(false);
+          setIsBatchPersonalizing(false);
+          
+          // Show a non-blocking notification
+          toast.info(`Personalization incomplete`, {
+            description: "Using available scores to personalize content.",
+            duration: 3000
+          });
+          
+          // Still try to use any results we have
+          if (status.results && status.results.length > 0) {
+            const updatedArticles = updateArticlesWithScores(allTabsArticles, status.results);
+            setPersonalizedArticles(updatedArticles);
+          }
+          
+          return;
+        }
+        
         // Update progress indicators
         setScoringProgress(status.progressPercentage);
         setProgressProcessed(status.processed);
@@ -346,8 +368,8 @@ const Index = () => {
           setIsBatchPersonalizing(false);
           setScoringTaskId(null);
           
-          toast.success("Content personalized successfully", {
-            description: `Found ${status.results.length} articles ranked for ${activePersona?.recipientName}`,
+          toast.success(`Content personalized for ${activePersona?.recipientName}`, {
+            description: `${status.results?.length || 0} articles ranked based on relevance to ${activePersona?.jobTitle || 'recipient'}`,
             duration: 3000
           });
         }
@@ -355,6 +377,12 @@ const Index = () => {
         console.error("Error polling for batch status:", error);
         setIsPolling(false);
         setIsBatchPersonalizing(false);
+        
+        // Show a non-blocking notification
+        toast.error("Personalization error", {
+          description: "Using default article ranking.",
+          duration: 3000
+        });
       }
     };
     
@@ -415,14 +443,16 @@ const Index = () => {
       // Start personalization immediately, regardless of current tab
       personalizeArticles();
       
-      // Show notification that personalization has started
-      toast.info(
-        `Personalizing content for ${activePersona.recipientName}`,
-        {
-          description: "Content is being personalized in the background. Switch to the Personalized tab to see results.",
-          duration: 5000
-        }
-      );
+      // Show notification that personalization process is continuing
+      setTimeout(() => {
+        toast.info(
+          `Personalizing for ${activePersona.recipientName}`,
+          {
+            description: "Content analysis is running in the background. Switch to the Personalized tab (if not already) to see results.",
+            duration: 7000
+          }
+        );
+      }, 2000); // Show this message 2 seconds after the initial one
     }
   }, [
     isPersonaActive, 

@@ -525,40 +525,63 @@ def get_batch_score_status(
 
     Returns the current progress and any results available so far.
     """
-    redis_client = get_redis_client()
+    try:
+        redis_client = get_redis_client()
 
-    # Check if task exists
-    if not redis_client.exists(f"article_scoring:{task_id}"):
-        raise HTTPException(status_code=404, detail="Task not found")
+        # Check if task exists
+        if not redis_client.exists(f"article_scoring:{task_id}"):
+            # Instead of error, return a status indicating the task doesn't exist
+            return {
+                "status": "expired",
+                "message": f"Task {task_id} not found or expired",
+                "processed": 0,
+                "total": 0,
+                "progress_percentage": 0,
+                "results": [],
+                "last_updated": get_articles_timestamp(db)
+            }
 
-    # Get task data
-    task_data = redis_client.hgetall(f"article_scoring:{task_id}")
+        # Get task data
+        task_data = redis_client.hgetall(f"article_scoring:{task_id}")
 
-    # Convert byte strings to regular strings
-    task_data = {k.decode('utf-8'): v.decode('utf-8')
-                 for k, v in task_data.items()}
+        # Convert byte strings to regular strings
+        task_data = {k.decode('utf-8'): v.decode('utf-8')
+                     for k, v in task_data.items()}
 
-    # Parse results JSON
-    if "results" in task_data:
-        try:
-            task_data["results"] = json.loads(task_data["results"])
-        except:
-            task_data["results"] = []
+        # Parse results JSON
+        if "results" in task_data:
+            try:
+                task_data["results"] = json.loads(task_data["results"])
+            except:
+                task_data["results"] = []
 
-    # Convert numeric values
-    if "total" in task_data:
-        task_data["total"] = int(task_data["total"])
-    if "processed" in task_data:
-        task_data["processed"] = int(task_data["processed"])
+        # Convert numeric values
+        if "total" in task_data:
+            task_data["total"] = int(task_data["total"])
+        if "processed" in task_data:
+            task_data["processed"] = int(task_data["processed"])
 
-    # Calculate progress percentage
-    if "total" in task_data and "processed" in task_data and task_data["total"] > 0:
-        task_data["progress_percentage"] = round(
-            (task_data["processed"] / task_data["total"]) * 100)
-    else:
-        task_data["progress_percentage"] = 0
+        # Calculate progress percentage
+        if "total" in task_data and "processed" in task_data and task_data["total"] > 0:
+            task_data["progress_percentage"] = round(
+                (task_data["processed"] / task_data["total"]) * 100)
+        else:
+            task_data["progress_percentage"] = 0
 
-    # Update last_updated timestamp
-    task_data["last_updated"] = get_articles_timestamp(db)
+        # Update last_updated timestamp
+        task_data["last_updated"] = get_articles_timestamp(db)
 
-    return task_data
+        return task_data
+
+    except Exception as e:
+        logger.error(f"Error retrieving batch score status: {e}")
+        # Return a valid response even when Redis fails
+        return {
+            "status": "error",
+            "message": f"Error retrieving task status: {str(e)}",
+            "processed": 0,
+            "total": 0,
+            "progress_percentage": 0,
+            "results": [],
+            "last_updated": get_articles_timestamp(db)
+        }
