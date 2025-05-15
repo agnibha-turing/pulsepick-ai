@@ -5,7 +5,7 @@ import { ArticleCard } from "@/components/article-card";
 import { FilterChips } from "@/components/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getArticles, DisplayArticle, batchScoreArticles, startBatchScoreArticles, getBatchScoreStatus } from "@/services/article-service";
+import { getArticles, DisplayArticle, batchScoreArticles, startBatchScoreArticles, getBatchScoreStatus, triggerArticleFetch, triggerReranking } from "@/services/article-service";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -481,17 +481,31 @@ const Index = () => {
     toast.info("Refreshing articles...");
     
     try {
-      // Refresh the current active view
+      // First, trigger fresh article fetch from external sources
+      await triggerArticleFetch();
+      toast.info("Fetching new articles from sources...");
+      
+      // Then trigger reranking
+      await triggerReranking();
+      toast.info("Updating relevance scores...");
+      
+      // After triggering backend processes, refresh the current view
       if (activeTab === "Personalized" && isPersonaActive) {
         // For personalized view, we need to rebuild our article collection
         // Clear existing collections
         setAllTabsArticles([]);
         setLoadedIndustries(new Set());
         
+        // Slight delay to allow backend to process new articles
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
         // Refetch and personalize
         await fetchAllIndustryTabs();
         await personalizeArticles();
       } else {
+        // Slight delay to allow backend to process new articles
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
         // Just refresh the current industry tab
         await fetchArticles();
       }
@@ -501,8 +515,10 @@ const Index = () => {
         toast.success("Articles refreshed successfully");
       }, 500);
     } catch (error) {
-      // If there was an error, it will be handled in fetchArticles
-      // and we don't need to show the success message
+      console.error("Error during refresh:", error);
+      toast.error("An error occurred while refreshing");
+    } finally {
+      setRefreshing(false);
     }
   };
 

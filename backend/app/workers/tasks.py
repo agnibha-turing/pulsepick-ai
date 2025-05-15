@@ -225,7 +225,7 @@ def update_all_relevance_scores():
 def fetch_all_articles():
     """Fetch articles from all sources with balanced industry distribution"""
     logger.info(
-        "Starting scheduled article fetch from all sources with balanced distribution")
+        "Starting article fetch from all sources with balanced distribution")
 
     # Remove general fetch and keep only industry-specific fetches for efficiency
     industry_jobs = []
@@ -242,8 +242,8 @@ def fetch_all_articles():
     finally:
         db.close()
 
-    # Run 5 minutes after fetch completes
-    update_all_relevance_scores.apply_async(countdown=300)
+    # Removed: No longer schedule automatic re-ranking after 5 minutes
+    # update_all_relevance_scores.apply_async(countdown=300)
 
     return "Scheduled balanced article fetch tasks"
 

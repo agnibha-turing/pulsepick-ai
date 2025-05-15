@@ -138,6 +138,49 @@ const mockArticles: BackendArticle[] = [
 // API URL - using relative path to work with the proxy
 const API_URL = "/api/articles";
 
+// New functions to trigger backend processes
+// Trigger fetch of fresh articles from news sources
+export const triggerArticleFetch = async (): Promise<{ message: string, taskId: string }> => {
+  try {
+    const response = await fetch(`${API_URL}/fetch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error("Failed to trigger article fetch");
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error("Error triggering article fetch:", error);
+    throw error;
+  }
+};
+
+// Trigger reranking of all articles
+export const triggerReranking = async (): Promise<{ message: string, taskId: string }> => {
+  try {
+    const response = await fetch(`${API_URL}/update-scores`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error("Failed to trigger article reranking");
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error("Error triggering article reranking:", error);
+    throw error;
+  }
+};
+
 // Convert API article format to display format for UI components
 const transformToDisplayArticle = (article: BackendArticle): DisplayArticle => {
   // Convert summary string to array - take the original as first item

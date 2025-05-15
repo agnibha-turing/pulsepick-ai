@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_COMPLETION_MODEL: str = "gpt-4.1"
+    OPENAI_COMPLETION_MODEL: str = "gpt-4.1-nano"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
     # Dimensions for text-embedding-3-large
     OPENAI_EMBEDDING_DIMENSIONS: int = 3072
