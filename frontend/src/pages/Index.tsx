@@ -123,6 +123,9 @@ const Index = () => {
   const [llmEnhanced, setLlmEnhanced] = useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = useState(false);
 
+  // New state to track if this is the initial load
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
   // New state for tracking all articles from all tabs
   const [allTabsArticles, setAllTabsArticles] = useState<DisplayArticle[]>([]);
   const [loadedIndustries, setLoadedIndustries] = useState<Set<string>>(new Set(["All"]));
@@ -396,66 +399,65 @@ const Index = () => {
     };
   }, [isPolling, scoringTaskId, allTabsArticles, activePersona, updateArticlesWithScores]);
 
-  // Simplified tab change handler - just switch tabs, no personalization triggering
-  const handleTabChange = (value: string) => {
-    if (value === "Personalized") {
-      // Simply switch to the personalized tab
-      setActiveTab("Personalized");
-    } else {
-      // Switch to a regular industry tab
-      setActiveTab(value);
-      setActiveIndustry(value);
-    }
-  };
-
   // Fetch regular articles on mount and when filters change
   useEffect(() => {
     const initialLoad = async () => {
       setLoading(true);
       try {
-        // On initial load/page reload, fetch fresh articles and rerank
-        const fetchPromise = triggerArticleFetch();
-        toast.info("Discovering new content...", {
-          description: "Fetching the latest articles from sources",
-          duration: 3000
-        });
-        
-        await fetchPromise;
-        
-        const rerankPromise = triggerReranking();
-        toast.info("Processing content...", {
-          description: "Analyzing and organizing articles",
-          duration: 3000
-        });
-        
-        await rerankPromise;
-        
-        // Slight delay to allow backend to process
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Only do the full refresh on initial load, not when switching tabs
+        if (isInitialLoad) {
+          // On initial load/page reload, fetch fresh articles and rerank
+          const fetchPromise = triggerArticleFetch();
+          toast.info("Discovering new content...", {
+            description: "Fetching the latest articles from sources",
+            duration: 3000
+          });
+          
+          await fetchPromise;
+          
+          const rerankPromise = triggerReranking();
+          toast.info("Processing content...", {
+            description: "Analyzing and organizing articles",
+            duration: 3000
+          });
+          
+          await rerankPromise;
+          
+          // Slight delay to allow backend to process
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Mark initial load as complete
+          setIsInitialLoad(false);
+        }
         
         // Then fetch the articles from database
         await fetchArticles();
         
-        // Show success toast after everything is complete
-        toast.success("Content ready", {
-          description: "Your feed has been updated with the latest articles",
-          duration: 3000
-        });
+        // Only show success toast on initial load, not tab switching
+        if (isInitialLoad) {
+          toast.success("Content ready", {
+            description: "Your feed has been updated with the latest articles",
+            duration: 3000
+          });
+        }
       } catch (error) {
         console.error("Error during initial load:", error);
         // Fall back to just loading existing data if the fetch/rerank fails
         fetchArticles();
-        toast.error("Could not fetch new content", {
-          description: "Showing existing articles from database",
-          duration: 3000
-        });
+        
+        if (isInitialLoad) {
+          toast.error("Could not fetch new content", {
+            description: "Showing existing articles from database",
+            duration: 3000
+          });
+        }
       } finally {
         setLoading(false);
       }
     };
     
     initialLoad();
-  }, [fetchArticles]);
+  }, [fetchArticles, isInitialLoad]);
 
   // Fetch articles for all tabs in the background
   useEffect(() => {
@@ -771,6 +773,18 @@ const Index = () => {
         </div>
       </div>
     );
+  };
+
+  // Modified tab change handler
+  const handleTabChange = (value: string) => {
+    if (value === "Personalized") {
+      // Simply switch to the personalized tab
+      setActiveTab("Personalized");
+    } else {
+      // Switch to a regular industry tab - loading handled by the effect
+      setActiveTab(value);
+      setActiveIndustry(value);
+    }
   };
 
   return (
