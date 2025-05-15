@@ -213,11 +213,6 @@ const Index = () => {
       
       await Promise.all(industryPromises);
       
-      toast.success("Content loaded for personalization", {
-        description: "Ready to personalize content based on your preferences",
-        duration: 3000
-      });
-      
     } catch (error) {
       console.error("Error loading all industries:", error);
     } finally {
@@ -415,7 +410,51 @@ const Index = () => {
 
   // Fetch regular articles on mount and when filters change
   useEffect(() => {
-    fetchArticles();
+    const initialLoad = async () => {
+      setLoading(true);
+      try {
+        // On initial load/page reload, fetch fresh articles and rerank
+        const fetchPromise = triggerArticleFetch();
+        toast.info("Discovering new content...", {
+          description: "Fetching the latest articles from sources",
+          duration: 3000
+        });
+        
+        await fetchPromise;
+        
+        const rerankPromise = triggerReranking();
+        toast.info("Processing content...", {
+          description: "Analyzing and organizing articles",
+          duration: 3000
+        });
+        
+        await rerankPromise;
+        
+        // Slight delay to allow backend to process
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Then fetch the articles from database
+        await fetchArticles();
+        
+        // Show success toast after everything is complete
+        toast.success("Content ready", {
+          description: "Your feed has been updated with the latest articles",
+          duration: 3000
+        });
+      } catch (error) {
+        console.error("Error during initial load:", error);
+        // Fall back to just loading existing data if the fetch/rerank fails
+        fetchArticles();
+        toast.error("Could not fetch new content", {
+          description: "Showing existing articles from database",
+          duration: 3000
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    initialLoad();
   }, [fetchArticles]);
 
   // Fetch articles for all tabs in the background
@@ -478,16 +517,25 @@ const Index = () => {
   // Handle refresh button click
   const handleRefresh = async () => {
     setRefreshing(true);
-    toast.info("Refreshing articles...");
     
     try {
       // First, trigger fresh article fetch from external sources
-      await triggerArticleFetch();
-      toast.info("Fetching new articles from sources...");
+      const fetchPromise = triggerArticleFetch();
+      toast.info("Discovering new content...", {
+        description: "Fetching the latest articles from sources",
+        duration: 3000
+      });
+      
+      await fetchPromise;
       
       // Then trigger reranking
-      await triggerReranking();
-      toast.info("Updating relevance scores...");
+      const rerankPromise = triggerReranking();
+      toast.info("Processing content...", {
+        description: "Analyzing and organizing articles",
+        duration: 3000
+      });
+      
+      await rerankPromise;
       
       // After triggering backend processes, refresh the current view
       if (activeTab === "Personalized" && isPersonaActive) {
@@ -510,13 +558,17 @@ const Index = () => {
         await fetchArticles();
       }
       
-      // Add a small delay before showing success message
-      setTimeout(() => {
-        toast.success("Articles refreshed successfully");
-      }, 500);
+      // Show success message after everything is complete
+      toast.success("Content refreshed", {
+        description: "Your feed has been updated with the latest articles",
+        duration: 3000
+      });
     } catch (error) {
       console.error("Error during refresh:", error);
-      toast.error("An error occurred while refreshing");
+      toast.error("An error occurred while refreshing", {
+        description: "Please try again later",
+        duration: 3000
+      });
     } finally {
       setRefreshing(false);
     }
