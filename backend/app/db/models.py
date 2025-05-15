@@ -68,6 +68,23 @@ class Article(Base):
         return f"<Article {self.title[:30]}...>"
 
 
+class Persona(Base):
+    recipient_name = Column(String(255), nullable=False)
+    job_title = Column(String(255), nullable=True)
+    company = Column(String(255), nullable=True)
+    conversation_context = Column(Text, nullable=True)
+    personality_traits = Column(Text, nullable=True)
+
+    # Unique constraint on combination of name, company, and job title
+    __table_args__ = (
+        UniqueConstraint('recipient_name', 'company',
+                         'job_title', name='unique_persona'),
+    )
+
+    def __repr__(self):
+        return f"<Persona {self.recipient_name}>"
+
+
 class SystemMetadata(Base):
     key = Column(String(255), nullable=False, unique=True)
     value = Column(JSON, nullable=True)

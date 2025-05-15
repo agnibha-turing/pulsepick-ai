@@ -31,7 +31,9 @@ import {
   SlidersHorizontal,
   PlusCircle,
   MessageSquare,
-  RefreshCw
+  RefreshCw,
+  ChevronDown,
+  Check
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -42,6 +44,17 @@ import {
   NavigationMenuTrigger,
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Technology", "Healthcare", "Other"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
@@ -104,7 +117,7 @@ const Index = () => {
   const [minRelevance, setMinRelevance] = useState([50]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const { activePersona, setActivePersona, isPersonaActive } = usePersona();
+  const { activePersona, setActivePersona, isPersonaActive, savedPersonas } = usePersona();
   const { selectedArticles, selectedCount } = useSelectedArticles();
   const [personaApplied, setPersonaApplied] = useState(false);
   const [llmEnhanced, setLlmEnhanced] = useState(false);
@@ -474,22 +487,106 @@ const Index = () => {
   };
 
   // Render the empty state for personalized tab when no persona
-  const renderPersonalizedEmptyState = () => (
-    <div className="text-center py-12 max-w-md mx-auto">
-      <div className="bg-primary/5 p-6 rounded-lg mb-6">
-        <UserPlus className="h-12 w-12 text-primary/70 mx-auto mb-4" />
+  const renderPersonalizedEmptyState = () => {
+    // Don't call hooks inside this render function - use values from parent component
+    return (
+      <div className="text-center py-12 max-w-md mx-auto">
+        <div className="bg-primary/5 p-6 rounded-lg mb-6">
+          <UserPlus className="h-12 w-12 text-primary/70 mx-auto mb-4" />
+        </div>
+        <h3 className="text-xl font-medium">Personalize Your Content</h3>
+        <p className="text-muted-foreground mt-3 mb-6">
+          Create a persona to see articles that matter most to you or your recipients. 
+          Content will be intelligently ranked based on relevance to job role, industry, and interests.
+        </p>
+        <div className="flex justify-center">
+          <div className="flex">
+            <Button 
+              onClick={handleOpenPersonaDialog} 
+              className="gap-2 px-4 rounded-r-none border-r-0 bg-black text-white hover:bg-black/90"
+              variant="default"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              {savedPersonas.length > 0 ? "Manage Personas" : "Create Persona"}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="default"
+                  className="rounded-l-none px-1.5 border-l-0 bg-black text-white hover:bg-black/90"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-[280px] px-0 py-1.5 shadow-lg" align="end" sideOffset={5}>
+                <div className="px-3 py-2 font-medium text-sm flex items-center justify-between">
+                  <span>Select Persona</span>
+                  {savedPersonas.length > 0 && (
+                    <Badge variant="secondary" className="font-normal">
+                      {savedPersonas.length}
+                    </Badge>
+                  )}
+                </div>
+                
+                {savedPersonas.length > 0 ? (
+                  <>
+                    {savedPersonas.map((savedPersona, index) => (
+                      <div 
+                        key={index}
+                        className={cn(
+                          "px-3 py-2 cursor-pointer hover:bg-muted transition-colors duration-150",
+                          activePersona && activePersona.recipientName === savedPersona.recipientName ? "bg-muted/50" : ""
+                        )}
+                        onClick={() => {
+                          setActivePersona(savedPersona);
+                          personalizeArticles();
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-9 w-9 border">
+                            <AvatarFallback className="text-sm bg-primary/10 text-primary font-medium">
+                              {savedPersona.recipientName.split(' ').map(name => name[0]).join('').toUpperCase().substring(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium flex items-center gap-2">
+                              {savedPersona.recipientName}
+                              {activePersona && activePersona.recipientName === savedPersona.recipientName && (
+                                <Check className="h-3.5 w-3.5 text-primary" />
+                              )}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {savedPersona.jobTitle} {savedPersona.company ? `· ${savedPersona.company}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <DropdownMenuSeparator className="my-1" />
+                  </>
+                ) : (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    No saved personas yet
+                  </div>
+                )}
+                
+                <div 
+                  className="px-3 py-2 cursor-pointer flex items-center gap-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
+                  onClick={handleOpenPersonaDialog}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span className="text-sm font-medium">
+                    {savedPersonas.length > 0 ? "Manage Personas" : "Create New Persona"}
+                  </span>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
       </div>
-      <h3 className="text-xl font-medium">Personalize Your Content</h3>
-      <p className="text-muted-foreground mt-3 mb-6">
-        Create a persona to see articles that matter most to you or your recipients. 
-        Content will be intelligently ranked based on relevance to job role, industry, and interests.
-      </p>
-      <Button onClick={handleOpenPersonaDialog} className="gap-2">
-        <UserPlus className="h-4 w-4" />
-        Create Persona
-      </Button>
-    </div>
-  );
+    );
+  };
 
   const formatLastUpdated = (timestamp: string) => {
     try {
@@ -757,7 +854,7 @@ const Index = () => {
               )}
               {lastUpdated && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Last updated (local): {formatLastUpdated(lastUpdated)}
+                  Last updated (local time): {formatLastUpdated(lastUpdated)}
                 </p>
               )}
             </div>
