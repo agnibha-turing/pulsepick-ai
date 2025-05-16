@@ -4,13 +4,15 @@ PulsePick AI is a tool for sales and marketing professionals to discover, curate
 
 ## Features
 
-- 🔍 **Content Discovery**: Automatic content discovery from Google News and NewsAPI
+- 🔍 **Content Discovery**: Article discovery from Google News and NewsAPI
 - 🧠 **AI-powered Processing**: Summarization, classification, and keyword extraction
 - 👤 **Persona Management**: Create recipient personas with personal and professional details
 - 🔎 **Content Selection**: Choose single or multiple articles to share with prospects
 - ✉️ **Personalized Messaging**: Generate platform-specific content tailored to recipients
 - 📊 **Intelligent Ranking**: Content relevance scoring based on multiple factors
-- 🔄 **Auto-Refresh**: Articles are fetched every 30 minutes and reranked 5 minutes later
+- 🔄 **Manual Refresh**: Fetch new articles on demand with one-click refresh
+- ⚡ **High-Performance Personalization**: Async processing and Redis caching for lightning-fast results
+- 🔃 **Distinct Refresh & Re-rank**: Clear separation between fetching new content and re-personalizing
 
 ## Key Components
 
@@ -22,6 +24,7 @@ Create personalized communications by:
 - Setting conversation context for continuity
 - Specifying personality traits to adjust tone and style
 - Generating platform-specific content (Email, LinkedIn, Twitter, Slack)
+- Instantly re-ranking content for different personas in seconds
 
 ### Multi-Platform Content Sharing
 
@@ -40,13 +43,16 @@ Efficiently manage your content sharing:
 - Preview generated messages before sharing
 - Regenerate content until it matches your needs
 - Copy content directly to clipboard
+- Get notifications when new content is available to personalize
+- One-click re-ranking of content for different recipients
 
 ## Tech Stack
 
 - **Frontend**: React, TypeScript, Vite, Tailwind CSS, shadcn/ui
 - **Backend**: FastAPI, SQLAlchemy, Postgres+pgvector, Celery, OpenAI
 - **Data Sources**: Google News RSS, NewsAPI.org, LinkedIn (coming soon)
-- **Infrastructure**: Docker, Redis
+- **Infrastructure**: Docker, Redis (for caching and task management)
+- **Performance**: Async HTTP processing, parallel API requests, intelligent score caching
 
 ## Getting Started
 
@@ -98,12 +104,14 @@ Efficiently manage your content sharing:
 
 ## Content Refresh and Reranking
 
-PulsePick AI keeps your content fresh and relevant through scheduled processes:
+PulsePick AI keeps your content fresh and relevant:
 
-- **Article Fetching**: Every 30 minutes, the system automatically fetches new articles from various sources (Google News, NewsAPI, LinkedIn)
-- **Content Reranking**: 5 minutes after each fetch, all articles are reranked based on relevance scoring
+- **Manual Article Fetching**: Users can trigger article fetches from various sources (Google News, NewsAPI, LinkedIn) using the Refresh button
+- **Content Re-ranking**: Separate Re-rank button for personalizing content without fetching new articles
 - **Last Updated Timestamp**: The UI displays when articles were last fetched or reranked in your local timezone
-- **Manual Refresh**: Users can manually trigger a refresh at any time using the refresh button
+- **Smart Notifications**: Get alerted when new articles are available to be personalized
+- **High-Performance Processing**: Cached scoring and parallel processing deliver results in seconds
+- **Clear UI Distinction**: Separate buttons for fetching new content (Refresh) and personalizing existing content (Re-rank)
 
 ## Component Architecture
 
