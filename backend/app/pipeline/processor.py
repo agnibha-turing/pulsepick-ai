@@ -1,15 +1,17 @@
-import openai
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Tuple
-from sqlalchemy.orm import Session
 import math
+from typing import List, Dict, Tuple, Optional, Any
+from datetime import datetime, timezone
+import logging
 import json
 import re
+import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from openai import OpenAI, AsyncOpenAI
 from sqlalchemy import func
-import logging
-
 from app.db.models import Article, Industry
 from app.core.config import settings
+from sqlalchemy.orm import Session
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ class ArticleProcessor:
 
     def __init__(self, db: Session):
         self.db = db
-        self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     def process_articles(self, articles: List[Dict[str, Any]]) -> List[Article]:
         """
@@ -243,6 +245,199 @@ class ArticleProcessor:
         # Return just the recency score without industry weighting
         return recency_score
 
+    def _calculate_persona_relevance_batch(self, articles: List[Article], persona: dict) -> List[float]:
+        """
+        Calculate relevance scores for multiple articles using concurrent API calls.
+        This is much more efficient than making individual sequential API calls.
+
+        Args:
+            articles: List of articles to score
+            persona: Persona data for scoring
+
+        Returns:
+            List of relevance scores in the same order as the input articles
+        """
+        if not articles:
+            return []
+
+        try:
+            # Extract persona attributes
+            recipient_name = persona.get("recipientName", "")
+            job_title = persona.get("jobTitle", "")
+            company = persona.get("company", "")
+            conversation_context = persona.get("conversationContext", "")
+            personality_traits = persona.get("personalityTraits", "")
+
+            # Create a combined description of the persona
+            persona_description = f"Recipient: {recipient_name}\n"
+            if job_title:
+                persona_description += f"Job title: {job_title}\n"
+            if company:
+                persona_description += f"Company: {company}\n"
+            if conversation_context:
+                persona_description += f"Previous conversation context: {conversation_context}\n"
+            if personality_traits:
+                persona_description += f"Personality traits: {personality_traits}\n"
+
+            # Prepare article contents and prompts
+            prompts = []
+
+            for article in articles:
+                article_content = f"Title: {article.title}\nSummary: {article.summary}\nIndustry: {article.industry}"
+
+                prompt = f"""
+                I need to determine how relevant an article is to a specific person.
+                
+                PERSONA INFORMATION:
+                {persona_description}
+                
+                ARTICLE CONTENT:
+                {article_content}
+                
+                Consider the following aspects:
+                1. How relevant is this article to the person's job role and responsibilities?
+                2. How relevant is this article to the person's company or industry?
+                3. How well does this article connect to their previous conversation context?
+                4. Would this content be valuable to this specific person?
+                
+                Return a relevance score between 0.0 and 1.0 where:
+                - 0.0 means completely irrelevant
+                - 1.0 means extremely relevant and perfectly aligned with their interests
+                
+                Output only the numerical score (e.g., 0.87) without any explanation or additional text.
+                """
+
+                prompts.append((article, prompt))
+
+            # Calculate scores with concurrent requests
+            scores = []
+            start_time = time.time()
+            logger.info(f"Starting batch scoring of {len(articles)} articles")
+
+            # Process in smaller concurrent batches for better throughput
+            batch_size = 5  # Process 5 articles concurrently
+            for i in range(0, len(prompts), batch_size):
+                batch_prompts = prompts[i:i+batch_size]
+                batch_scores = self._process_prompts_concurrently(
+                    batch_prompts)
+                scores.extend(batch_scores)
+
+            end_time = time.time()
+            logger.info(
+                f"Completed batch scoring in {end_time - start_time:.2f} seconds")
+
+            return scores
+
+        except Exception as e:
+            logger.error(f"Error in batch persona relevance scoring: {e}")
+            # Return default scores
+            return [0.5] * len(articles)
+
+    def _process_prompts_concurrently(self, batch_prompts) -> List[float]:
+        """
+        Process a batch of prompts concurrently using ThreadPoolExecutor.
+
+        Args:
+            batch_prompts: List of (article, prompt) tuples
+
+        Returns:
+            List of scores
+        """
+        scores = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = []
+            for article, prompt in batch_prompts:
+                futures.append(executor.submit(
+                    self._score_single_article, prompt))
+
+            # Collect results in order
+            for future in futures:
+                try:
+                    score = future.result()
+                    scores.append(score)
+                except Exception as e:
+                    logger.error(f"Error scoring article: {e}")
+                    # Use a default score on error
+                    scores.append(0.5)
+
+        return scores
+
+    def _score_single_article(self, prompt: str) -> float:
+        """Score a single article using OpenAI API"""
+        try:
+            response = self.openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precision relevance scoring system that evaluates content relevance to specific personas."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1
+            )
+
+            # Extract the score from the response
+            result = response.choices[0].message.content.strip()
+            try:
+                # Try to convert to float
+                score = float(result)
+                # Ensure it's within 0-1 range
+                score = max(0.0, min(1.0, score))
+                return score
+            except ValueError:
+                logger.warning(
+                    f"Failed to parse OpenAI relevance score: {result}")
+                return 0.5
+
+        except Exception as e:
+            logger.error(f"Error in single article scoring: {e}")
+            return 0.5
+
+    def calculate_combined_relevance_scores_batch(self, articles: List[Article], persona: dict = None) -> List[float]:
+        """
+        Calculate combined relevance scores for multiple articles in a batch.
+
+        Args:
+            articles: List of articles to score
+            persona: Persona data for personalization
+
+        Returns:
+            List of combined relevance scores
+        """
+        if not articles:
+            return []
+
+        # Calculate recency scores for all articles
+        recency_scores = [self._calculate_relevance_score(
+            article) for article in articles]
+
+        # If no persona provided, return just the recency scores
+        if not persona:
+            return recency_scores
+
+        # Get persona relevance scores using batch API
+        persona_scores = self._calculate_persona_relevance_batch(
+            articles, persona)
+
+        # Weights for combining scores
+        w1 = 0.3  # Weight for recency
+        w2 = 0.7  # Weight for persona relevance
+
+        # Calculate combined scores
+        combined_scores = []
+        for i in range(len(articles)):
+            recency_score = recency_scores[i]
+            persona_score = persona_scores[i] if i < len(
+                persona_scores) else 0.5
+
+            # Calculate combined score
+            final_score = (w1 * recency_score) + (w2 * persona_score)
+
+            # Ensure score is between 0 and 1
+            final_score = max(0.0, min(1.0, final_score))
+            combined_scores.append(final_score)
+
+        return combined_scores
+
     def _enrich_metadata(self, title: str, content: str, url: str, raw_json: dict) -> Tuple[Optional[str], Optional[datetime]]:
         """
         Attempt to extract missing metadata (author, publication date) from content
@@ -433,3 +628,145 @@ Article:
             logger.error(f"Error extracting keywords: {e}")
             # Return default keywords on failure
             return ["AI", "Technology", "News"]
+
+    def calculate_combined_relevance_score(self, article: Article, persona: dict = None) -> float:
+        """
+        Calculate a combined relevance score factoring in both recency and persona relevance.
+
+        This is a compatibility method that uses the batch scoring internally.
+        If persona is provided, the formula is:
+        final_score = (w1 * recency_score) + (w2 * persona_relevance_score)
+
+        If no persona is provided, return just the recency score.
+        """
+        # If no persona provided, use just the recency score
+        if not persona:
+            return self._calculate_relevance_score(article)
+
+        # Use the batch scoring method with a single article
+        scores = self.calculate_combined_relevance_scores_batch(
+            [article], persona)
+
+        # Return the score or a default if something went wrong
+        if scores and len(scores) > 0:
+            return scores[0]
+        else:
+            # Fallback to calculating just recency score in case of error
+            logger.warning(
+                "Batch scoring failed, falling back to recency score")
+            return self._calculate_relevance_score(article)
+
+    def _calculate_persona_relevance_score(self, article: Article, persona: dict) -> float:
+        """
+        Calculate a persona-based relevance score for the article.
+
+        This is now a compatibility method that uses the batch processing internally.
+
+        Returns a score from 0.0 to 1.0, where higher is more relevant.
+        """
+        # Default score if we can't calculate relevance
+        if not article.title or not article.summary:
+            return 0.5
+
+        # Use the batch method with a single article
+        scores = self._calculate_persona_relevance_batch([article], persona)
+
+        # Return the score or a default if something went wrong
+        if scores and len(scores) > 0:
+            return scores[0]
+        else:
+            return 0.5  # Default score
+
+    def _calculate_persona_relevance_fallback(self, article: Article, persona: dict) -> float:
+        """
+        Simple fallback method for persona relevance using keyword matching.
+
+        This provides a basic score when batch processing fails.
+        """
+        # Extract persona attributes
+        job_title = persona.get("jobTitle", "").lower()
+        company = persona.get("company", "").lower()
+        industry = persona.get("industry", "").lower()
+
+        # Combine article content
+        article_content = f"{article.title} {article.summary}".lower()
+
+        # Count simple matches
+        score = 0.0
+        matches = 0
+
+        # Check for job title keywords
+        if job_title and any(word for word in job_title.split() if len(word) > 3 and word in article_content):
+            matches += 1
+
+        # Check for company name
+        if company and company in article_content:
+            matches += 1
+
+        # Check for industry match
+        if industry and industry in article_content:
+            matches += 1
+
+        # Check for article industry
+        if article.industry and industry and article.industry == industry:
+            matches += 1
+
+        # Simple scoring based on matches
+        if matches > 0:
+            score = min(1.0, matches / 4.0)
+        else:
+            score = 0.3  # Base score for any article
+
+        return score
+
+    def _extract_job_role_terms(self, job_title: str) -> list:
+        """Extract relevant terms from a job title for matching."""
+        # Common job title components
+        common_roles = [
+            "manager", "director", "executive", "analyst", "specialist",
+            "engineer", "developer", "architect", "consultant", "advisor",
+            "officer", "lead", "head", "chief", "vp", "president", "ceo", "cto", "cio"
+        ]
+
+        # Common industries/departments
+        common_departments = [
+            "sales", "marketing", "product", "engineering", "development", "finance",
+            "hr", "operations", "research", "strategy", "technology", "it", "security",
+            "data", "analytics", "customer", "support", "service", "business", "legal"
+        ]
+
+        job_title_lower = job_title.lower()
+        terms = job_title_lower.split()
+
+        # Add original terms
+        result = [term for term in terms if len(term) > 2]
+
+        # Add matched roles and departments
+        for role in common_roles:
+            if role in job_title_lower and role not in result:
+                result.append(role)
+
+        for dept in common_departments:
+            if dept in job_title_lower and dept not in result:
+                result.append(dept)
+
+        return result
+
+    def _infer_industry_from_text(self, text: str) -> str:
+        """Infer industry from text (job title, company, etc.)"""
+        text_lower = text.lower()
+
+        industry_keywords = {
+            "bfsi": ["bank", "finance", "insurance", "wealth", "investment", "trading", "fintech"],
+            "retail": ["retail", "ecommerce", "shop", "store", "consumer", "merchandise"],
+            "technology": ["tech", "software", "hardware", "cloud", "saas", "digital", "computer", "it"],
+            "healthcare": ["health", "medical", "pharma", "biotech", "hospital", "clinic", "patient"],
+            "other": []
+        }
+
+        for industry, keywords in industry_keywords.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    return industry
+
+        return "other"

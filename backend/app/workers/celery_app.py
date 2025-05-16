@@ -8,11 +8,12 @@ celery_app = Celery(
 )
 
 # Configure Celery beat schedule for periodic tasks
-celery_app.conf.beat_schedule = {
-    "fetch-articles-periodically": {
-        "task": "app.workers.tasks.fetch_all_articles",
-        "schedule": 60.0 * settings.FETCH_INTERVAL_MINUTES,  # Every N minutes
-    },
-}
+# celery_app.conf.beat_schedule = {
+#     "fetch-articles-periodically": {
+#         "task": "app.workers.tasks.fetch_all_articles",
+#         "schedule": 60.0 * settings.FETCH_INTERVAL_MINUTES,  # Every N minutes
+#     },
+# }
 
+# Scheduled tasks commented out - now only triggered manually
 celery_app.conf.timezone = "UTC"

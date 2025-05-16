@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, Integer, ForeignKey, Text, Float, DateTim
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
+from datetime import datetime
 
 from app.db.base_class import Base
 from app.core.config import settings
@@ -65,3 +66,29 @@ class Article(Base):
 
     def __repr__(self):
         return f"<Article {self.title[:30]}...>"
+
+
+class Persona(Base):
+    recipient_name = Column(String(255), nullable=False)
+    job_title = Column(String(255), nullable=True)
+    company = Column(String(255), nullable=True)
+    conversation_context = Column(Text, nullable=True)
+    personality_traits = Column(Text, nullable=True)
+
+    # Unique constraint on combination of name, company, and job title
+    __table_args__ = (
+        UniqueConstraint('recipient_name', 'company',
+                         'job_title', name='unique_persona'),
+    )
+
+    def __repr__(self):
+        return f"<Persona {self.recipient_name}>"
+
+
+class SystemMetadata(Base):
+    key = Column(String(255), nullable=False, unique=True)
+    value = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SystemMetadata {self.key}>"

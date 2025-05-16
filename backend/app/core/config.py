@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_COMPLETION_MODEL: str = "gpt-4.1"
+    OPENAI_COMPLETION_MODEL: str = "gpt-4.1-nano"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
     # Dimensions for text-embedding-3-large
     OPENAI_EMBEDDING_DIMENSIONS: int = 3072
@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # Feed Parameters
     FETCH_INTERVAL_MINUTES: int = 30
     ARTICLE_FETCH_LIMIT: int = 100
+
+    # Redis settings - use the same host as CELERY_BROKER_URL for consistency
+    @property
+    def REDIS_URL(self) -> str:
+        # Extract host from CELERY_BROKER_URL to ensure they're the same
+        # This handles both local dev (localhost) and Docker (redis service name)
+        return self.CELERY_BROKER_URL
 
     # Look for .env in parent directory (project root) when running locally
     # When in Docker, environment variables are passed directly
