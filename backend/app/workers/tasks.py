@@ -4,6 +4,7 @@ import logging
 from celery import group
 import os
 import asyncio
+import time
 
 from app.workers.celery_app import celery_app
 from app.db.session import SessionLocal
@@ -253,8 +254,8 @@ def batch_score_articles_async(self, article_ids, persona):
     """
     Process and score articles in batches asynchronously.
 
-    This task scores articles based on persona relevance in parallel batches,
-    with progress tracking and incremental result delivery.
+    This task scores articles based on persona relevance in optimized batches,
+    using OpenAI's batch API capabilities for maximum performance.
 
     Args:
         article_ids: List of article IDs to score
@@ -281,14 +282,15 @@ def batch_score_articles_async(self, article_ids, persona):
                 "results": json.dumps([])
             }
         )
-        # Expire after 1 hour
-        redis_client.expire(f"article_scoring:{task_id}", 3600)
+        # Set a reasonable expiration time for processing tasks
+        # 30 minutes for processing
+        redis_client.expire(f"article_scoring:{task_id}", 1800)
 
         # Create processor for personalized scoring
         processor = ArticleProcessor(db)
 
-        # Batch size for processing
-        BATCH_SIZE = 5
+        # Increase batch size substantially - OpenAI batch API can handle larger batches efficiently
+        BATCH_SIZE = 50  # Increased from 20 to 50 for maximum throughput
 
         # Split into batches
         batches = [article_ids[i:i + BATCH_SIZE]
@@ -298,26 +300,54 @@ def batch_score_articles_async(self, article_ids, persona):
         all_results = []
         processed_count = 0
 
-        for batch in batches:
+        # Keep track of total articles successfully processed
+        total_processed = 0
+
+        # Process each batch of article IDs
+        for batch_idx, batch in enumerate(batches):
+            start_time = time.time()
+            logger.info(
+                f"Processing batch {batch_idx+1}/{len(batches)} with {len(batch)} articles")
+
             # Get articles for this batch
             batch_articles = db.query(Article).filter(
                 Article.id.in_(batch)).all()
-            batch_results = []
 
-            # Score each article in the batch
-            for article in batch_articles:
-                score = processor.calculate_combined_relevance_score(
-                    article, persona)
+            # Skip empty batches
+            if not batch_articles:
+                logger.warning(
+                    f"Batch {batch_idx+1} contained no valid articles, skipping")
+                continue
 
-                result = {
-                    "id": article.id,
-                    "relevance_score": score
-                }
-                batch_results.append(result)
-                all_results.append(result)
+            # Use the batch scoring method - this now utilizes OpenAI's batch capability
+            try:
+                scores = processor.calculate_combined_relevance_scores_batch(
+                    batch_articles, persona)
 
-                # Update progress after each article
-                processed_count += 1
+                # Create results
+                batch_results = []
+                for i, article in enumerate(batch_articles):
+                    if i < len(scores):
+                        result = {
+                            "id": article.id,
+                            "relevance_score": scores[i]
+                        }
+                        batch_results.append(result)
+                        all_results.append(result)
+
+                # Update processed count
+                processed_count = total_processed + len(batch_results)
+                total_processed = processed_count
+
+                end_time = time.time()
+                batch_time = end_time - start_time
+                articles_per_second = len(
+                    batch_results) / batch_time if batch_time > 0 else 0
+
+                logger.info(f"Batch {batch_idx+1} processed {len(batch_results)} articles in {batch_time:.2f}s "
+                            f"({articles_per_second:.2f} articles/sec). Total: {processed_count}/{len(article_ids)}")
+
+                # Update progress in Redis - only do this once per batch to reduce Redis operations
                 redis_client.hset(
                     f"article_scoring:{task_id}", "processed", processed_count)
 
@@ -328,17 +358,29 @@ def batch_score_articles_async(self, article_ids, persona):
                           'total': len(article_ids)}
                 )
 
-            # Update results in Redis after each batch
-            redis_client.hset(
-                f"article_scoring:{task_id}",
-                "results",
-                json.dumps(all_results)
-            )
+                # Update results in Redis after each batch
+                redis_client.hset(
+                    f"article_scoring:{task_id}",
+                    "results",
+                    json.dumps(all_results)
+                )
+
+            except Exception as e:
+                # Log the error but continue processing other batches
+                logger.error(f"Error processing batch {batch_idx+1}: {e}")
+                # Wait a bit before trying the next batch if there was an error
+                time.sleep(1)
 
         # Mark as completed
         redis_client.hset(f"article_scoring:{task_id}", "status", "completed")
 
-        logger.info(f"Completed async batch scoring for task {task_id}")
+        # Set a reasonable expiration time for completed tasks in production
+        # 1 hour is sufficient for production
+        redis_client.expire(f"article_scoring:{task_id}", 3600)
+
+        logger.info(f"Completed async batch scoring for task {task_id}. "
+                    f"Successfully processed {total_processed}/{len(article_ids)} articles.")
+
         return {"task_id": task_id, "status": "completed", "scored_count": len(all_results)}
 
     except Exception as e:

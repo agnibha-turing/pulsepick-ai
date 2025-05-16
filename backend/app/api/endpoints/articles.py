@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 import random  # For generating demo images
 import json
+import time
+import logging
 # Updated import for pgvector 0.4.1
 
 from app.db.models import Article, Industry
@@ -13,6 +15,9 @@ from app.workers.tasks import fetch_all_articles, update_all_relevance_scores, b
 from app.db.utils import get_articles_timestamp, update_articles_timestamp
 from app.core.redis import get_redis_client
 
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -449,6 +454,7 @@ def batch_score_articles(
 
     This endpoint accepts a list of article IDs and a persona,
     and returns personalization scores for those articles.
+    Uses efficient batch processing for much faster performance.
     """
     article_ids = request_data.get("article_ids", [])
     persona = request_data.get("persona")
@@ -463,18 +469,18 @@ def batch_score_articles(
     # Retrieve articles by ID
     articles = db.query(Article).filter(Article.id.in_(article_ids)).all()
 
-    # Score articles using LLM
-    scored_articles = []
-    for article in articles:
-        # Calculate combined score using LLM, skip the fallback method
-        # We're using the calculate_combined_relevance_score which will use the LLM
-        # for persona relevance scoring
-        score = processor.calculate_combined_relevance_score(article, persona)
+    # Use the optimized batch scoring method
+    scores = processor.calculate_combined_relevance_scores_batch(
+        articles, persona)
 
-        scored_articles.append({
-            "id": article.id,
-            "relevance_score": score
-        })
+    # Create results with scores
+    scored_articles = []
+    for i, article in enumerate(articles):
+        if i < len(scores):
+            scored_articles.append({
+                "id": article.id,
+                "relevance_score": scores[i]
+            })
 
     # Update timestamp to reflect this personalization
     update_articles_timestamp(db)
@@ -527,18 +533,20 @@ def get_batch_score_status(
     """
     try:
         redis_client = get_redis_client()
+        start_time = time.time()
 
         # Check if task exists
         if not redis_client.exists(f"article_scoring:{task_id}"):
             # Instead of error, return a status indicating the task doesn't exist
             return {
                 "status": "expired",
-                "message": f"Task {task_id} not found or expired",
+                "message": f"Task {task_id} not found or expired. Results may already be available.",
                 "processed": 0,
                 "total": 0,
                 "progress_percentage": 0,
                 "results": [],
-                "last_updated": get_articles_timestamp(db)
+                "last_updated": get_articles_timestamp(db),
+                "error": "Task expired or not found"
             }
 
         # Get task data
@@ -552,7 +560,9 @@ def get_batch_score_status(
         if "results" in task_data:
             try:
                 task_data["results"] = json.loads(task_data["results"])
-            except:
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"Failed to parse results JSON for task {task_id}")
                 task_data["results"] = []
 
         # Convert numeric values
@@ -568,8 +578,27 @@ def get_batch_score_status(
         else:
             task_data["progress_percentage"] = 0
 
+        # Add performance metrics
+        end_time = time.time()
+        query_time = end_time - start_time
+
+        # Add processing time metadata
+        task_data["query_time"] = round(query_time, 3)
+        task_data["articles_per_second"] = round(
+            task_data["processed"] / query_time, 2) if query_time > 0 and task_data["processed"] > 0 else 0
+
         # Update last_updated timestamp
         task_data["last_updated"] = get_articles_timestamp(db)
+
+        # Reset expiration time on each status check to prevent premature expiration
+        # for active tasks
+        if task_data["status"] == "processing":
+            # 30 minutes for processing tasks
+            redis_client.expire(f"article_scoring:{task_id}", 1800)
+        elif task_data["status"] == "completed":
+            # Also extend expiration for completed tasks on status check
+            # 1 hour for completed tasks
+            redis_client.expire(f"article_scoring:{task_id}", 3600)
 
         return task_data
 
@@ -583,5 +612,6 @@ def get_batch_score_status(
             "total": 0,
             "progress_percentage": 0,
             "results": [],
-            "last_updated": get_articles_timestamp(db)
+            "last_updated": get_articles_timestamp(db),
+            "error": str(e)
         }

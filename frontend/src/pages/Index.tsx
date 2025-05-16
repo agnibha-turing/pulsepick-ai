@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ArticleCard } from "@/components/article-card";
@@ -143,6 +143,12 @@ const Index = () => {
   const [progressProcessed, setProgressProcessed] = useState<number>(0);
   const [isPolling, setIsPolling] = useState<boolean>(false);
 
+  // Use a ref to track personalization in progress to avoid duplicate toasts
+  const personalizationInProgressRef = useRef(false);
+
+  // Create a constant for maximum articles to display
+  const MAX_DISPLAY_ARTICLES = 100;
+
   // Fetch regular articles (recency-based sorting)
   const fetchArticles = useCallback(async (industry: string = activeIndustry) => {
     if (industry === activeIndustry) {
@@ -266,13 +272,15 @@ const Index = () => {
   const personalizeArticles = useCallback(async () => {
     if (!isPersonaActive || !activePersona) return;
     
+    // Set the in-progress ref to true
+    personalizationInProgressRef.current = true;
     setIsBatchPersonalizing(true);
     
     try {
       // Show an initial toast indicating process is starting
       toast.info("Starting personalization...", {
         description: "Preparing to analyze content relevance for your persona",
-        duration: 3000
+        duration: 4000
       });
       
       // Make sure we have articles from all tabs
@@ -285,8 +293,8 @@ const Index = () => {
         new Set(allTabsArticles.map(article => article.id))
       );
       
-      // Clear personalized articles during processing
-      setPersonalizedArticles([]);
+      // Don't clear personalized articles during processing - this causes UI flicker
+      // Keep existing articles visible until new ones are ready
       
       // Start async batch scoring
       const taskResult = await startBatchScoreArticles(uniqueArticleIds, activePersona);
@@ -310,6 +318,8 @@ const Index = () => {
       console.error("Error personalizing articles:", error);
       toast.error("Failed to personalize content");
       setIsBatchPersonalizing(false);
+      // Reset in-progress ref on error
+      personalizationInProgressRef.current = false;
     }
   }, [
     isPersonaActive, 
@@ -319,7 +329,7 @@ const Index = () => {
     fetchAllIndustryTabs
   ]);
   
-  // Add polling effect
+  // Polling effect with toast tracking
   useEffect(() => {
     let pollInterval: NodeJS.Timeout | null = null;
     
@@ -331,54 +341,126 @@ const Index = () => {
         
         // Special handling for expired or failed tasks
         if (status.status === "expired" || status.status === "failed") {
-          console.warn(`Task ${scoringTaskId} ${status.status}`);
+          console.warn(`Task ${scoringTaskId} ${status.status}: ${
+            (status as any).message || (status as any).error || "No details available"
+          }`);
           setIsPolling(false);
           setIsBatchPersonalizing(false);
           
-          // Show a non-blocking notification
-          toast.info(`Personalization incomplete`, {
-            description: "Using available scores to personalize content.",
-            duration: 3000
+          // Reset in-progress ref on error
+          personalizationInProgressRef.current = false;
+          
+          // Show a more informative notification
+          toast.info(`Personalization ${status.status}`, {
+            description: (status as any).message || "Using available scores to personalize content.",
+            duration: 5000
           });
           
           // Still try to use any results we have
           if (status.results && status.results.length > 0) {
+            console.log(`Using ${status.results.length} partial results for personalization`);
             const updatedArticles = updateArticlesWithScores(allTabsArticles, status.results);
             setPersonalizedArticles(updatedArticles);
+          } else {
+            // Don't automatically retry - this causes duplicate tasks
+            console.log("No results available from expired task");
+            toast.info("Personalization expired", {
+              description: "You can retry manually if needed",
+              duration: 3000
+            });
           }
           
           return;
         }
         
         // Update progress indicators
-        setScoringProgress(status.progressPercentage);
+        // Implement smooth progress updates - never jump backward and ensure we reach 100%
+        if (status.progressPercentage > scoringProgress) {
+          setScoringProgress(status.progressPercentage);
+        }
         setProgressProcessed(status.processed);
         
         // Check if processing is complete
         if (status.status === "completed") {
-          // Only update articles when processing is completely finished
-          if (status.results && status.results.length > 0) {
-            const updatedArticles = updateArticlesWithScores(allTabsArticles, status.results);
-            setPersonalizedArticles(updatedArticles);
+          // Even if backend processing is complete, ensure the progress bar animation finishes
+          // Only update articles when progress bar reaches 100%
+          if (scoringProgress < 100) {
+            // Animate to 100% before showing results
+            setScoringProgress(100);
+            
+            // Add a fixed minimum delay of 1.5 seconds to ensure progress bar animation is visible
+            // This creates a more satisfying UX where users can see the progress complete
+            setTimeout(() => {
+              if (status.results && status.results.length > 0) {
+                const updatedArticles = updateArticlesWithScores(allTabsArticles, status.results);
+                
+                // Delay showing articles until progress bar animation is fully complete
+                // Add another small delay after progress reaches 100% for visual satisfaction
+                setTimeout(() => {
+                  setPersonalizedArticles(updatedArticles);
+                  setIsPolling(false);
+                  setIsBatchPersonalizing(false);
+                  setScoringTaskId(null);
+                  
+                  // Only show success toast if personalization is still in progress
+                  if (personalizationInProgressRef.current) {
+                    toast.success(`Content personalized for ${activePersona?.recipientName}`, {
+                      description: `${status.results?.length || 0} articles ranked based on relevance to ${activePersona?.jobTitle || 'recipient'}`,
+                      duration: 4000
+                    });
+                    // Reset the ref after showing toast
+                    personalizationInProgressRef.current = false;
+                  }
+                }, 800); // Delay showing articles by 800ms after progress hits 100%
+              } else {
+                setIsPolling(false);
+                setIsBatchPersonalizing(false);
+                setScoringTaskId(null);
+                // Reset in-progress ref when done
+                personalizationInProgressRef.current = false;
+              }
+            }, 1500); // Fixed delay to ensure animation is visible
+          } else {
+            // Progress already at 100%, still add a delay for consistent experience
+            if (status.results && status.results.length > 0) {
+              const updatedArticles = updateArticlesWithScores(allTabsArticles, status.results);
+              
+              // Add consistent delay even when already at 100%
+              setTimeout(() => {
+                setPersonalizedArticles(updatedArticles);
+                setIsPolling(false);
+                setIsBatchPersonalizing(false);
+                setScoringTaskId(null);
+                
+                // Only show success toast if personalization is still in progress
+                if (personalizationInProgressRef.current) {
+                  toast.success(`Content personalized for ${activePersona?.recipientName}`, {
+                    description: `${status.results?.length || 0} articles ranked based on relevance to ${activePersona?.jobTitle || 'recipient'}`,
+                    duration: 4000
+                  });
+                  // Reset the ref after showing toast
+                  personalizationInProgressRef.current = false;
+                }
+              }, 800);
+            } else {
+              setIsPolling(false);
+              setIsBatchPersonalizing(false);
+              setScoringTaskId(null);
+              // Reset in-progress ref when done
+              personalizationInProgressRef.current = false;
+            }
           }
-          
-          setIsPolling(false);
-          setIsBatchPersonalizing(false);
-          setScoringTaskId(null);
-          
-          toast.success(`Content personalized for ${activePersona?.recipientName}`, {
-            description: `${status.results?.length || 0} articles ranked based on relevance to ${activePersona?.jobTitle || 'recipient'}`,
-            duration: 3000
-          });
         }
       } catch (error) {
         console.error("Error polling for batch status:", error);
         setIsPolling(false);
         setIsBatchPersonalizing(false);
+        // Reset in-progress ref on error
+        personalizationInProgressRef.current = false;
         
         // Show a non-blocking notification
         toast.error("Personalization error", {
-          description: "Using default article ranking.",
+          description: "Using default article ranking. Try again later.",
           duration: 3000
         });
       }
@@ -397,7 +479,7 @@ const Index = () => {
         clearInterval(pollInterval);
       }
     };
-  }, [isPolling, scoringTaskId, allTabsArticles, activePersona, updateArticlesWithScores]);
+  }, [isPolling, scoringTaskId, allTabsArticles, activePersona, updateArticlesWithScores, scoringProgress]);
 
   // Fetch regular articles on mount and when filters change
   useEffect(() => {
@@ -525,7 +607,7 @@ const Index = () => {
       const fetchPromise = triggerArticleFetch();
       toast.info("Discovering new content...", {
         description: "Fetching the latest articles from sources",
-        duration: 3000
+        duration: 4000
       });
       
       await fetchPromise;
@@ -534,7 +616,7 @@ const Index = () => {
       const rerankPromise = triggerReranking();
       toast.info("Processing content...", {
         description: "Analyzing and organizing articles",
-        duration: 3000
+        duration: 4000
       });
       
       await rerankPromise;
@@ -542,15 +624,23 @@ const Index = () => {
       // After triggering backend processes, refresh the current view
       if (activeTab === "Personalized" && isPersonaActive) {
         // For personalized view, we need to rebuild our article collection
-        // Clear existing collections
-        setAllTabsArticles([]);
-        setLoadedIndustries(new Set());
+        // DO NOT clear existing personalized articles - this causes the UI to flicker
+        // Just set the loading indicator
+        setIsBatchPersonalizing(true);
+        
+        // Reset progress indicators to create visual transition
+        // We'll animate from 100 to 0 to signal a fresh processing cycle
+        setScoringProgress(0);
+        setProgressProcessed(0);
+        setIsPolling(true);
         
         // Slight delay to allow backend to process new articles
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Refetch and personalize
+        // Fetch new articles in the background without clearing existing ones
         await fetchAllIndustryTabs();
+        
+        // Start personalization process
         await personalizeArticles();
       } else {
         // Slight delay to allow backend to process new articles
@@ -560,24 +650,30 @@ const Index = () => {
         await fetchArticles();
       }
       
-      // Show success message after everything is complete
-      toast.success("Content refreshed", {
-        description: "Your feed has been updated with the latest articles",
-        duration: 3000
-      });
+      // Show success message after everything is complete - only if not in personalized view
+      // (personalized view has its own success message)
+      if (!(activeTab === "Personalized" && isPersonaActive)) {
+        toast.success("Content refreshed", {
+          description: "Your feed has been updated with the latest articles",
+          duration: 4000
+        });
+      }
     } catch (error) {
       console.error("Error during refresh:", error);
       toast.error("An error occurred while refreshing", {
         description: "Please try again later",
-        duration: 3000
+        duration: 4000
       });
     } finally {
       setRefreshing(false);
     }
   };
 
-  // Determine which articles to display
-  const displayArticles = activeTab === "Personalized" ? personalizedArticles : articles;
+  // Determine which articles to display (with cap at 100)
+  const allArticles = activeTab === "Personalized" ? personalizedArticles : articles;
+  // Apply the maximum limit for display
+  const displayArticles = allArticles.slice(0, MAX_DISPLAY_ARTICLES);
+  const totalArticleCount = allArticles.length;
   const isPersonalizedView = activeTab === "Personalized";
   const isLoading = (isPersonalizedView ? isBatchPersonalizing : loading) || refreshing;
 
@@ -639,7 +735,6 @@ const Index = () => {
                         )}
                         onClick={() => {
                           setActivePersona(savedPersona);
-                          personalizeArticles();
                         }}
                       >
                         <div className="flex items-center gap-3">
@@ -732,18 +827,44 @@ const Index = () => {
     // Show progress indicator when in personalized view and either loading or polling
     if (!(isPersonalizedView && (isLoading || isPolling))) return null;
     
+    // Determine message based on refresh status
+    const getStatusMessage = () => {
+      if (refreshing) {
+        return "Refreshing personalization";
+      } else if (scoringProgress === 0) {
+        return "Starting personalization";
+      } else if (scoringProgress < 100) {
+        return "Analyzing article relevance";
+      } else {
+        return "Finalizing personalization";
+      }
+    };
+    
+    // Helper to get initials from name
+    const getInitials = (name: string) => {
+      if (!name) return "?";
+      return name
+        .split(' ')
+        .map(part => part[0])
+        .join('')
+        .toUpperCase()
+        .substring(0, 2);
+    };
+    
     return (
       <div className="mb-6 max-w-3xl mx-auto bg-card/80 border rounded-lg p-5 shadow-lg backdrop-blur-md transition-all duration-300">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-2">
           <div className="flex items-center gap-3">
-            <div className="bg-primary/20 p-2.5 rounded-full">
-              <User className="h-5 w-5 text-primary" />
-            </div>
+            <Avatar className="h-10 w-10 border">
+              <AvatarFallback className="bg-primary/20 text-primary font-medium">
+                {getInitials(activePersona?.recipientName || "")}
+              </AvatarFallback>
+            </Avatar>
             <div>
               <p className="font-medium text-sm">
                 Personalizing for <span className="font-semibold">{activePersona?.recipientName}</span>
               </p>
-              <p className="text-xs text-muted-foreground">Analyzing article relevance</p>
+              <p className="text-xs text-muted-foreground">{getStatusMessage()}</p>
             </div>
           </div>
           <Badge variant="secondary" className="bg-primary/10 text-primary font-medium px-3 py-1 self-start sm:self-auto">
@@ -767,7 +888,7 @@ const Index = () => {
                 : 'Initializing...'}
             </p>
             <p className="text-xs text-muted-foreground">
-              Articles will appear when complete
+              {refreshing ? "Preparing updated content" : "Articles will appear when complete"}
             </p>
           </div>
         </div>
@@ -946,13 +1067,46 @@ const Index = () => {
         <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-2xl font-bold">
-                {activeTab === "Personalized" 
-                  ? "Personalized Content" 
-                  : (activeTab === "All" ? "All Industries" : activeTab)}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold">
+                  {activeTab === "Personalized" 
+                    ? "Personalized Content" 
+                    : (activeTab === "All" ? "All Industries" : activeTab)}
+                </h1>
+                <div className="relative h-[22px] w-[34px] flex items-center justify-center mt-1">
+                  <AnimatePresence initial={false}>
+                    <motion.div
+                      key={`${activeTab}-count-${isLoading ? 'loading' : 'loaded'}`}
+                      initial={{ opacity: 0, position: 'absolute' }}
+                      animate={{ opacity: 1, position: 'absolute' }}
+                      exit={{ opacity: 0, position: 'absolute' }}
+                      transition={{ 
+                        opacity: { duration: 0.25, ease: "easeInOut" }
+                      }}
+                      className="absolute inset-0 flex items-center justify-center"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      {isLoading ? (
+                        <div className="bg-primary/30 text-primary-foreground/70 font-semibold text-xs rounded px-1.5 py-0 inline-flex items-center justify-center min-w-[28px]">
+                          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                        </div>
+                      ) : displayArticles.length > 0 ? (
+                        <div className="bg-primary text-primary-foreground font-semibold text-xs rounded px-1.5 py-0 inline-flex items-center justify-center min-w-[28px]">
+                          {totalArticleCount > MAX_DISPLAY_ARTICLES 
+                            ? `${displayArticles.length}` 
+                            : totalArticleCount}
+                        </div>
+                      ) : (
+                        <div className="bg-primary/10 text-primary/30 font-semibold text-xs rounded px-1.5 py-0 inline-flex items-center justify-center min-w-[28px]">
+                          0
+                        </div>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+              </div>
               {isPersonaActive && activePersona?.recipientName && activeTab === "Personalized" && (
-                <div className="text-sm text-muted-foreground mt-1 flex items-center flex-wrap">
+                <div className="text-sm text-muted-foreground mt-1 flex items-center flex-wrap gap-2">
                   <span>
                     Content ranked for <span className="font-medium">{activePersona.recipientName}</span>
                     {activePersona.jobTitle && ` (${activePersona.jobTitle})`}

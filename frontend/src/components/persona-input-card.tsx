@@ -206,11 +206,6 @@ export function PersonaInputCard({
       onPersonaSubmit(persona);
     }
     
-    // Request article refresh to apply persona-based ranking
-    if (onRefreshRequest) {
-      onRefreshRequest();
-    }
-    
     setTimeout(() => {
       toast.success("Persona profile applied", {
         description: "Content personalization will start shortly",
@@ -329,11 +324,6 @@ export function PersonaInputCard({
     // Call parent callback if provided
     if (onPersonaSubmit) {
       onPersonaSubmit(selected);
-    }
-    
-    // Request article refresh to apply persona-based ranking
-    if (onRefreshRequest) {
-      onRefreshRequest();
     }
     
     setTimeout(() => {
