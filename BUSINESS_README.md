@@ -21,12 +21,14 @@ Sales professionals face three critical challenges that PulsePick addresses:
 - **Time Savings**: Reduce time spent researching relevant content and drafting customized messages
 - **Streamlined Workflow**: Single interface for discovering content and creating communications
 - **Batch Processing**: Generate multiple personalized messages simultaneously
+- **Lightning-Fast Personalization**: Advanced caching and parallel processing delivers personalized content in seconds
 
 #### Enhanced Client Relationships
 
 - **Personalized Engagement**: Communications tailored to each recipient's role, company, and preferences
 - **Conversation Continuity**: Reference previous discussions in new communications
 - **Tone Matching**: Adapt message style to match recipient's communication preferences
+- **Instant Relevance**: Immediately see content ranked by relevance to each specific recipient
 
 #### Improved Sales Performance
 
@@ -42,7 +44,8 @@ PulsePick presents relevant, timely content from trusted sources:
 
 - **Industry-Specific Content**: Articles filtered by sector (Banking, Retail, Healthcare, Technology)
 - **Relevance Filtering**: Content ranked by importance to specific industries
-- **Regular Updates**: Fresh content automatically added as it becomes available
+- **Manual Updates**: Fresh content available with one-click refresh
+- **New Content Notifications**: Alerts when new content needs personalization
 
 ### Personalized Recipient Profiles
 
@@ -59,6 +62,8 @@ Choose the most relevant content for sharing:
 - **Individual or Batch Selection**: Share a single article or curate a collection
 - **Visual Management**: Clear indicators for selected items
 - **Flexible Organization**: Group articles by theme or recipient
+- **Intelligent Re-ranking**: One-click re-ranking of content for different recipients
+- **New Content Alerts**: Notifications when fresh content is available to personalize
 
 ### AI-Powered Message Generation
 
@@ -119,8 +124,10 @@ PulsePick integrates seamlessly into your daily sales routine:
    - Follow up on meetings with relevant content
    - Respond to industry news with timely insights
    - Nurture ongoing conversations with valuable information
+   - Re-rank existing content for new personas in seconds
 
 3. **Weekly Planning (15 minutes)**
+
    - Create and update recipient personas
    - Review content engagement patterns
    - Adjust communication approach based on results

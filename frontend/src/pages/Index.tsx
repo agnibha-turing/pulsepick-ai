@@ -33,7 +33,8 @@ import {
   MessageSquare,
   RefreshCw,
   ChevronDown,
-  Check
+  Check,
+  ArrowUpDown
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -59,6 +60,18 @@ import { cn } from "@/lib/utils";
 const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Technology", "Healthcare", "Other"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
 const AVAILABLE_TIME_PERIODS = ["Today", "7 Days", "30 Days", "Custom"];
+
+// Add this interface near other interfaces at the top of the file
+interface BatchScoreStatus {
+  status: string;
+  processed: number;
+  total: number;
+  progressPercentage: number;
+  results: Array<{ id: number, relevance_score: number }>;
+  lastUpdated: string;
+  message?: string;
+  error?: string;
+}
 
 // Add these animation variants outside the component
 const containerVariants = {
@@ -148,6 +161,9 @@ const Index = () => {
 
   // Create a constant for maximum articles to display
   const MAX_DISPLAY_ARTICLES = 100;
+
+  // New state to track if there are new articles since last personalization
+  const [hasNewArticles, setHasNewArticles] = useState(false);
 
   // Fetch regular articles (recency-based sorting)
   const fetchArticles = useCallback(async (industry: string = activeIndustry) => {
@@ -268,7 +284,7 @@ const Index = () => {
     return uniqueArticles;
   }, []);
 
-  // Updated version with async processing
+  // Re-personalize existing articles without fetching new ones
   const personalizeArticles = useCallback(async () => {
     if (!isPersonaActive || !activePersona) return;
     
@@ -278,14 +294,17 @@ const Index = () => {
     
     try {
       // Show an initial toast indicating process is starting
-      toast.info("Starting personalization...", {
-        description: "Preparing to analyze content relevance for your persona",
+      toast.info("Re-ranking articles...", {
+        description: "Analyzing content relevance for your persona",
         duration: 4000
       });
       
-      // Make sure we have articles from all tabs
-      if (allTabsArticles.length === 0 || loadedIndustries.size < 2) {
-        await fetchAllIndustryTabs();
+      // Use existing articles - no fetching of new articles
+      if (allTabsArticles.length === 0) {
+        toast.error("No articles to personalize");
+        setIsBatchPersonalizing(false);
+        personalizationInProgressRef.current = false;
+        return;
       }
       
       // Get the IDs of all the unique articles
@@ -293,11 +312,11 @@ const Index = () => {
         new Set(allTabsArticles.map(article => article.id))
       );
       
-      // Don't clear personalized articles during processing - this causes UI flicker
-      // Keep existing articles visible until new ones are ready
+      // Limit to maximum display limit to avoid processing unnecessary articles
+      const limitedArticleIds = uniqueArticleIds.slice(0, MAX_DISPLAY_ARTICLES);
       
-      // Start async batch scoring
-      const taskResult = await startBatchScoreArticles(uniqueArticleIds, activePersona);
+      // Start async batch scoring with the limited set
+      const taskResult = await startBatchScoreArticles(limitedArticleIds, activePersona);
       
       // Store task ID for polling
       setScoringTaskId(taskResult.taskId);
@@ -314,6 +333,9 @@ const Index = () => {
       setPersonaApplied(true);
       setLlmEnhanced(true);
       
+      // Reset new articles flag since we've just re-ranked
+      setHasNewArticles(false);
+      
     } catch (error) {
       console.error("Error personalizing articles:", error);
       toast.error("Failed to personalize content");
@@ -324,12 +346,10 @@ const Index = () => {
   }, [
     isPersonaActive, 
     activePersona, 
-    allTabsArticles, 
-    loadedIndustries, 
-    fetchAllIndustryTabs
+    allTabsArticles
   ]);
   
-  // Polling effect with toast tracking
+  // Polling effect with toast tracking - optimized for a single large batch
   useEffect(() => {
     let pollInterval: NodeJS.Timeout | null = null;
     
@@ -342,7 +362,7 @@ const Index = () => {
         // Special handling for expired or failed tasks
         if (status.status === "expired" || status.status === "failed") {
           console.warn(`Task ${scoringTaskId} ${status.status}: ${
-            (status as any).message || (status as any).error || "No details available"
+            (status as BatchScoreStatus).message || (status as BatchScoreStatus).error || "No details available"
           }`);
           setIsPolling(false);
           setIsBatchPersonalizing(false);
@@ -352,7 +372,7 @@ const Index = () => {
           
           // Show a more informative notification
           toast.info(`Personalization ${status.status}`, {
-            description: (status as any).message || "Using available scores to personalize content.",
+            description: (status as BatchScoreStatus).message || "Using available scores to personalize content.",
             duration: 5000
           });
           
@@ -373,22 +393,28 @@ const Index = () => {
           return;
         }
         
-        // Update progress indicators
-        // Implement smooth progress updates - never jump backward and ensure we reach 100%
+        // For single large batches, implement smooth progress animation
+        // We want gradual progress even if backend reports jumps
         if (status.progressPercentage > scoringProgress) {
-          setScoringProgress(status.progressPercentage);
+          // For smoother animation, move only 10% closer to the actual value
+          // This creates a gradual "catching up" effect for better UX
+          const smoothedProgress = Math.min(
+            scoringProgress + Math.max(2, Math.ceil((status.progressPercentage - scoringProgress) / 5)),
+            status.progressPercentage
+          );
+          setScoringProgress(smoothedProgress);
         }
         setProgressProcessed(status.processed);
         
         // Check if processing is complete
         if (status.status === "completed") {
-          // Even if backend processing is complete, ensure the progress bar animation finishes
+          // With a single larger batch, ensure we display a complete progress animation
           // Only update articles when progress bar reaches 100%
           if (scoringProgress < 100) {
             // Animate to 100% before showing results
             setScoringProgress(100);
             
-            // Add a fixed minimum delay of 1.5 seconds to ensure progress bar animation is visible
+            // Add a fixed minimum delay of 2 seconds to ensure progress bar animation is visible
             // This creates a more satisfying UX where users can see the progress complete
             setTimeout(() => {
               if (status.results && status.results.length > 0) {
@@ -411,7 +437,7 @@ const Index = () => {
                     // Reset the ref after showing toast
                     personalizationInProgressRef.current = false;
                   }
-                }, 800); // Delay showing articles by 800ms after progress hits 100%
+                }, 1000); // Increased delay for showing articles (1 second) after progress hits 100%
               } else {
                 setIsPolling(false);
                 setIsBatchPersonalizing(false);
@@ -419,7 +445,7 @@ const Index = () => {
                 // Reset in-progress ref when done
                 personalizationInProgressRef.current = false;
               }
-            }, 1500); // Fixed delay to ensure animation is visible
+            }, 2000); // Increased delay to ensure animation is visible for single batch
           } else {
             // Progress already at 100%, still add a delay for consistent experience
             if (status.results && status.results.length > 0) {
@@ -441,7 +467,7 @@ const Index = () => {
                   // Reset the ref after showing toast
                   personalizationInProgressRef.current = false;
                 }
-              }, 800);
+              }, 1000);
             } else {
               setIsPolling(false);
               setIsBatchPersonalizing(false);
@@ -470,8 +496,9 @@ const Index = () => {
       // Initial poll immediately
       pollForResults();
       
-      // Set up polling interval - reduce to 1 second for faster updates
-      pollInterval = setInterval(pollForResults, 1000);
+      // For a single large batch, poll less frequently to reduce server load
+      // but frequently enough to provide visual feedback
+      pollInterval = setInterval(pollForResults, 1500);
     }
     
     return () => {
@@ -572,7 +599,7 @@ const Index = () => {
           `Personalizing for ${activePersona.recipientName}`,
           {
             description: "Content analysis is running in the background. Switch to the Personalized tab (if not already) to see results.",
-            duration: 7000
+            duration: 4000
           }
         );
       }, 2000); // Show this message 2 seconds after the initial one
@@ -598,8 +625,11 @@ const Index = () => {
     }
   }, [isPersonaActive, activePersona?.recipientName, lastPersonaId]);
 
-  // Handle refresh button click
+  // Handle refresh button click - fetch fresh articles from external sources
   const handleRefresh = async () => {
+    // This function is only for the general tabs, not the personalized tab
+    // For personalized tab, use personalizeArticles() instead
+    
     setRefreshing(true);
     
     try {
@@ -621,40 +651,25 @@ const Index = () => {
       
       await rerankPromise;
       
-      // After triggering backend processes, refresh the current view
-      if (activeTab === "Personalized" && isPersonaActive) {
-        // For personalized view, we need to rebuild our article collection
-        // DO NOT clear existing personalized articles - this causes the UI to flicker
-        // Just set the loading indicator
-        setIsBatchPersonalizing(true);
-        
-        // Reset progress indicators to create visual transition
-        // We'll animate from 100 to 0 to signal a fresh processing cycle
-        setScoringProgress(0);
-        setProgressProcessed(0);
-        setIsPolling(true);
-        
-        // Slight delay to allow backend to process new articles
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Fetch new articles in the background without clearing existing ones
-        await fetchAllIndustryTabs();
-        
-        // Start personalization process
-        await personalizeArticles();
-      } else {
-        // Slight delay to allow backend to process new articles
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Just refresh the current industry tab
-        await fetchArticles();
-      }
+      // Slight delay to allow backend to process new articles
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Show success message after everything is complete - only if not in personalized view
-      // (personalized view has its own success message)
-      if (!(activeTab === "Personalized" && isPersonaActive)) {
+      // Check how many articles we had before
+      const previousCount = articles.length;
+      
+      // Just refresh the current industry tab
+      await fetchArticles();
+      
+      // Track if new articles were added
+      if (articles.length > previousCount) {
+        setHasNewArticles(true);
+        toast.success(`${articles.length - previousCount} new articles added`, {
+          description: "Switch to Personalized tab and re-rank to personalize them",
+          duration: 5000
+        });
+      } else {
         toast.success("Content refreshed", {
-          description: "Your feed has been updated with the latest articles",
+          description: "No new articles found",
           duration: 4000
         });
       }
@@ -827,16 +842,14 @@ const Index = () => {
     // Show progress indicator when in personalized view and either loading or polling
     if (!(isPersonalizedView && (isLoading || isPolling))) return null;
     
-    // Determine message based on refresh status
+    // Simplified status message for fast processing
     const getStatusMessage = () => {
       if (refreshing) {
         return "Refreshing personalization";
-      } else if (scoringProgress === 0) {
-        return "Starting personalization";
-      } else if (scoringProgress < 100) {
-        return "Analyzing article relevance";
+      } else if (scoringProgress < 90) {
+        return "Personalizing content for recipient";
       } else {
-        return "Finalizing personalization";
+        return "Almost ready!";
       }
     };
     
@@ -868,14 +881,16 @@ const Index = () => {
             </div>
           </div>
           <Badge variant="secondary" className="bg-primary/10 text-primary font-medium px-3 py-1 self-start sm:self-auto">
-            {progressProcessed > 0 ? `${progressProcessed}/${progressTotal} articles` : 'Starting...'}
+            {scoringProgress < 90 
+              ? 'Personalizing...' 
+              : `${progressTotal} articles`}
           </Badge>
         </div>
         
         <div className="mt-4 space-y-2">
           <div className="relative w-full h-2.5 bg-primary/10 rounded-full overflow-hidden">
             <div 
-              className="absolute left-0 top-0 h-full bg-primary transition-all duration-300 rounded-full"
+              className="absolute left-0 top-0 h-full bg-primary transition-all duration-300 ease-out rounded-full"
               style={{ width: `${scoringProgress}%` }}
             ></div>
           </div>
@@ -883,12 +898,12 @@ const Index = () => {
           <div className="flex justify-between items-center">
             <p className="text-xs text-muted-foreground flex items-center">
               <RefreshCw className="h-3 w-3 mr-1.5 animate-spin text-primary" />
-              {scoringProgress > 0 
-                ? `${scoringProgress}% complete` 
-                : 'Initializing...'}
+              {scoringProgress < 90
+                ? 'Using AI to analyze articles'
+                : 'Finalizing your feed...'}
             </p>
             <p className="text-xs text-muted-foreground">
-              {refreshing ? "Preparing updated content" : "Articles will appear when complete"}
+              {refreshing ? "Preparing updated content" : "Using AI + cache for speed"}
             </p>
           </div>
         </div>
@@ -906,6 +921,41 @@ const Index = () => {
       setActiveTab(value);
       setActiveIndustry(value);
     }
+  };
+
+  // Add a component to render the new content notification
+  const renderNewContentPrompt = () => {
+    // Don't show when:
+    // 1. There are no new articles, or
+    // 2. We're not in the personalized tab, or
+    // 3. Personalization is already happening, or
+    // 4. A new persona was just applied (personalization happens automatically)
+    if (!hasNewArticles || 
+        !isPersonaActive || 
+        activeTab !== "Personalized" || 
+        isBatchPersonalizing || 
+        lastPersonalizationTime && (Date.now() - lastPersonalizationTime < 10000)) return null;
+    
+    return (
+      <div className="mb-4 bg-primary/10 border border-primary/20 rounded-lg p-4 flex items-start gap-3">
+        <ArrowUpDown className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+        <div>
+          <h4 className="font-medium text-sm">New content available</h4>
+          <p className="text-sm text-muted-foreground mt-1">
+            New articles have been added. Click the "Re-rank" button to include them in your personalized feed.
+          </p>
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="mt-3 bg-primary hover:bg-primary/90"
+            onClick={personalizeArticles}
+            disabled={isBatchPersonalizing}
+          >
+            Re-rank now
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1125,18 +1175,33 @@ const Index = () => {
               )}
             </div>
             <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="gap-2"
-                onClick={handleRefresh}
-                disabled={loading || refreshing || isBatchPersonalizing || isLoadingAllTabs}
-              >
-                <RefreshCw className={`h-4 w-4 ${
-                  refreshing || isBatchPersonalizing || isLoadingAllTabs ? 'animate-spin' : ''
-                }`} />
-                <span className="hidden sm:inline">Refresh</span>
-              </Button>
+              {activeTab === "Personalized" ? (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2"
+                  onClick={personalizeArticles}
+                  disabled={loading || refreshing || isBatchPersonalizing || isLoadingAllTabs}
+                >
+                  <ArrowUpDown className={`h-4 w-4 ${
+                    isBatchPersonalizing ? 'animate-spin' : ''
+                  }`} />
+                  <span className="hidden sm:inline">Re-rank</span>
+                </Button>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2"
+                  onClick={handleRefresh}
+                  disabled={loading || refreshing || isBatchPersonalizing || isLoadingAllTabs}
+                >
+                  <RefreshCw className={`h-4 w-4 ${
+                    refreshing || isBatchPersonalizing || isLoadingAllTabs ? 'animate-spin' : ''
+                  }`} />
+                  <span className="hidden sm:inline">Refresh</span>
+                </Button>
+              )}
               <PersonaInputCard 
                 className="w-auto persona-button" 
                 onRefreshRequest={personalizeArticles} 
@@ -1212,6 +1277,9 @@ const Index = () => {
                   <>
                     {/* Progress indicator - show in both loading and when articles are being displayed */}
                     {isPersonalizedView && isPolling && renderProgressIndicator()}
+                    
+                    {/* New content notification prompt */}
+                    {renderNewContentPrompt()}
                     
                     {/* Articles grid */}
                     <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" variants={containerVariants}>
