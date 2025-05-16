@@ -12,6 +12,7 @@ from sqlalchemy import func
 from app.db.models import Article, Industry
 from app.core.config import settings
 from sqlalchemy.orm import Session
+from app.core.redis import get_redis_client
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -29,6 +30,10 @@ class ArticleProcessor:
     def __init__(self, db: Session):
         self.db = db
         self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        # Add async client for parallel processing
+        self.async_openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        # Add Redis client for caching
+        self.redis_client = get_redis_client()
 
     def process_articles(self, articles: List[Dict[str, Any]]) -> List[Article]:
         """
@@ -392,9 +397,66 @@ class ArticleProcessor:
             logger.error(f"Error in single article scoring: {e}")
             return 0.5
 
+    async def _score_single_article_async(self, article_id: int, prompt: str) -> Tuple[int, float]:
+        """Score a single article using OpenAI API asynchronously"""
+        try:
+            response = await self.async_openai_client.chat.completions.create(
+                model=settings.OPENAI_COMPLETION_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a precision relevance scoring system that evaluates content relevance to specific personas."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1
+            )
+
+            # Extract the score from the response
+            result = response.choices[0].message.content.strip()
+            try:
+                # Try to convert to float
+                score = float(result)
+                # Ensure it's within 0-1 range
+                score = max(0.0, min(1.0, score))
+                return (article_id, score)
+            except ValueError:
+                logger.warning(
+                    f"Failed to parse OpenAI relevance score: {result}")
+                return (article_id, 0.5)
+
+        except Exception as e:
+            logger.error(f"Error in async article scoring: {e}")
+            return (article_id, 0.5)
+
+    async def _process_prompts_async(self, batch_prompts) -> List[Tuple[int, float]]:
+        """
+        Process a batch of prompts concurrently using asyncio.
+
+        Args:
+            batch_prompts: List of (article_id, prompt) tuples
+
+        Returns:
+            List of (article_id, score) tuples
+        """
+        tasks = []
+        for article_id, prompt in batch_prompts:
+            tasks.append(self._score_single_article_async(article_id, prompt))
+
+        return await asyncio.gather(*tasks)
+
+    def _get_cache_key(self, article_id: int, persona_hash: str) -> str:
+        """Generate a cache key for article personalization scores"""
+        return f"personalize:{article_id}:{persona_hash}"
+
+    def _get_persona_hash(self, persona: dict) -> str:
+        """Generate a hash for the persona to use in cache keys"""
+        # Create a stable representation of the persona for hashing
+        persona_str = f"{persona.get('recipientName', '')}-{persona.get('jobTitle', '')}-{persona.get('company', '')}"
+        return str(hash(persona_str))
+
     def calculate_combined_relevance_scores_batch(self, articles: List[Article], persona: dict = None) -> List[float]:
         """
         Calculate combined relevance scores for multiple articles in a batch.
+        Now with improved parallelization using asyncio and caching using Redis.
 
         Args:
             articles: List of articles to score
@@ -406,6 +468,9 @@ class ArticleProcessor:
         if not articles:
             return []
 
+        # Start timer for performance tracking
+        batch_start_time = time.time()
+
         # Calculate recency scores for all articles
         recency_scores = [self._calculate_relevance_score(
             article) for article in articles]
@@ -414,20 +479,116 @@ class ArticleProcessor:
         if not persona:
             return recency_scores
 
-        # Get persona relevance scores using batch API
-        persona_scores = self._calculate_persona_relevance_batch(
-            articles, persona)
+        # Generate persona hash for cache keys
+        persona_hash = self._get_persona_hash(persona)
+
+        # Check cache for previously scored articles
+        cached_scores = {}
+        articles_to_score = []
+        article_ids_to_score = []
+
+        for idx, article in enumerate(articles):
+            cache_key = self._get_cache_key(article.id, persona_hash)
+            cached_score = self.redis_client.get(cache_key)
+
+            if cached_score is not None:
+                try:
+                    cached_scores[article.id] = float(
+                        cached_score.decode('utf-8'))
+                    logger.info(
+                        f"Cache hit for article {article.id} with persona {persona_hash}")
+                except (ValueError, TypeError):
+                    # If we can't parse the cached value, score it again
+                    articles_to_score.append(article)
+                    article_ids_to_score.append(article.id)
+            else:
+                articles_to_score.append(article)
+                article_ids_to_score.append(article.id)
+
+        logger.info(
+            f"Cache hits: {len(cached_scores)}, Cache misses: {len(articles_to_score)}")
+
+        # If all scores were in cache, no need to call OpenAI API
+        persona_scores = {}
+
+        # Only call OpenAI if we have articles that need scoring
+        if articles_to_score:
+            # Extract persona attributes for prompt generation
+            recipient_name = persona.get("recipientName", "")
+            job_title = persona.get("jobTitle", "")
+            company = persona.get("company", "")
+            conversation_context = persona.get("conversationContext", "")
+            personality_traits = persona.get("personalityTraits", "")
+
+            # Create a combined description of the persona
+            persona_description = f"Recipient: {recipient_name}\n"
+            if job_title:
+                persona_description += f"Job title: {job_title}\n"
+            if company:
+                persona_description += f"Company: {company}\n"
+            if conversation_context:
+                persona_description += f"Previous conversation context: {conversation_context}\n"
+            if personality_traits:
+                persona_description += f"Personality traits: {personality_traits}\n"
+
+            # Prepare article contents and prompts for the ones we need to score
+            prompts = []
+
+            for idx, article in enumerate(articles_to_score):
+                article_content = f"Title: {article.title}\nSummary: {article.summary}\nIndustry: {article.industry}"
+
+                prompt = f"""
+                I need to determine how relevant an article is to a specific person.
+                
+                PERSONA INFORMATION:
+                {persona_description}
+                
+                ARTICLE CONTENT:
+                {article_content}
+                
+                Consider the following aspects:
+                1. How relevant is this article to the person's job role and responsibilities?
+                2. How relevant is this article to the person's company or industry?
+                3. How well does this article connect to their previous conversation context?
+                4. Would this content be valuable to this specific person?
+                
+                Return a relevance score between 0.0 and 1.0 where:
+                - 0.0 means completely irrelevant
+                - 1.0 means extremely relevant and perfectly aligned with their interests
+                
+                Output only the numerical score (e.g., 0.87) without any explanation or additional text.
+                """
+
+                prompts.append((article_ids_to_score[idx], prompt))
+
+            # Process all prompts asynchronously in one batch
+            async_results = asyncio.run(self._process_prompts_async(prompts))
+
+            # Store results by article ID
+            new_scores = {}
+            for article_id, score in async_results:
+                new_scores[article_id] = score
+
+                # Cache the new score (with 24-hour expiration)
+                cache_key = self._get_cache_key(article_id, persona_hash)
+                self.redis_client.setex(cache_key, 86400, str(score))
+
+            # Combine with cached scores
+            persona_scores = {**cached_scores, **new_scores}
+        else:
+            # All scores were from cache
+            persona_scores = cached_scores
 
         # Weights for combining scores
         w1 = 0.3  # Weight for recency
         w2 = 0.7  # Weight for persona relevance
 
-        # Calculate combined scores
+        # Calculate combined scores (ordered by original article list)
         combined_scores = []
-        for i in range(len(articles)):
-            recency_score = recency_scores[i]
-            persona_score = persona_scores[i] if i < len(
-                persona_scores) else 0.5
+        for idx, article in enumerate(articles):
+            recency_score = recency_scores[idx]
+            # Get persona score by article ID
+            persona_score = persona_scores.get(article.id, 0.5)
 
             # Calculate combined score
             final_score = (w1 * recency_score) + (w2 * persona_score)
@@ -435,6 +596,14 @@ class ArticleProcessor:
             # Ensure score is between 0 and 1
             final_score = max(0.0, min(1.0, final_score))
             combined_scores.append(final_score)
+
+        # Log performance metrics
+        batch_end_time = time.time()
+        batch_duration = batch_end_time - batch_start_time
+        articles_per_second = len(articles) / \
+            batch_duration if batch_duration > 0 else 0
+        logger.info(
+            f"Processed {len(articles)} articles in {batch_duration:.2f}s ({articles_per_second:.2f} articles/sec)")
 
         return combined_scores
 
@@ -669,7 +838,8 @@ Article:
             return 0.5
 
         # Use the batch method with a single article
-        scores = self._calculate_persona_relevance_batch([article], persona)
+        scores = self.calculate_combined_relevance_scores_batch(
+            [article], persona)
 
         # Return the score or a default if something went wrong
         if scores and len(scores) > 0:

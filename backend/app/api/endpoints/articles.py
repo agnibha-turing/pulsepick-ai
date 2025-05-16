@@ -590,15 +590,15 @@ def get_batch_score_status(
         # Update last_updated timestamp
         task_data["last_updated"] = get_articles_timestamp(db)
 
-        # Reset expiration time on each status check to prevent premature expiration
+        # Update expiration time on each status check to prevent premature expiration
         # for active tasks
         if task_data["status"] == "processing":
-            # 30 minutes for processing tasks
-            redis_client.expire(f"article_scoring:{task_id}", 1800)
+            # 40 minutes for processing tasks (increased for larger batch size)
+            redis_client.expire(f"article_scoring:{task_id}", 2400)
         elif task_data["status"] == "completed":
             # Also extend expiration for completed tasks on status check
-            # 1 hour for completed tasks
-            redis_client.expire(f"article_scoring:{task_id}", 3600)
+            # 2 hours for completed tasks (increased for larger batch size)
+            redis_client.expire(f"article_scoring:{task_id}", 7200)
 
         return task_data
 
