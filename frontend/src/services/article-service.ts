@@ -183,12 +183,19 @@ export const triggerReranking = async (): Promise<{ message: string, taskId: str
 
 // Convert API article format to display format for UI components
 const transformToDisplayArticle = (article: BackendArticle): DisplayArticle => {
-  // Convert summary string to array - take the original as first item
-  const summaryArray = [article.summary];
+  // Ensure summary exists (use empty string if null or undefined)
+  const summary = article.summary || '';
   
+  // Convert summary string to array - take the original as first item
+  const summaryArray = [summary];
+  
+  // If summary is empty or very short, create a placeholder summary
+  if (!summary || summary.length < 10) {
+    summaryArray[0] = `Follow the link to read the full article about "${article.title}".`;
+  }
   // Add some extracted sentences if summary is long enough
-  if (article.summary.length > 100) {
-    const sentences = article.summary.match(/[^.!?]+[.!?]+/g) || [];
+  else if (summary.length > 100) {
+    const sentences = summary.match(/[^.!?]+[.!?]+/g) || [];
     if (sentences.length > 1) {
       summaryArray.push(sentences[1].trim());
     }
@@ -202,16 +209,24 @@ const transformToDisplayArticle = (article: BackendArticle): DisplayArticle => {
     categories.push(industry);
   }
   
+  // Default trendingScore based on whether the article has a proper summary
+  let trendingScore = Math.round((article.relevance_score || 0.5) * 100); // Convert to 0-100 scale
+  
+  // If article has no summary or very short summary, reduce trending score
+  if (!summary || summary.length < 10) {
+    trendingScore = Math.max(10, Math.floor(trendingScore * 0.5));
+  }
+  
   return {
     id: article.id.toString(),
-    title: article.title,
+    title: article.title || 'Untitled Article',
     summary: summaryArray,
-    trendingScore: Math.round(article.relevance_score * 100), // Convert to 0-100 scale
+    trendingScore: trendingScore,
     categories: categories,
-    keywords: article.keywords || ["AI", "Technology", "Innovation", "Digital", article.industry],
-    date: article.published_at,
+    keywords: article.keywords || ["AI", "Technology", "Innovation", "Digital", article.industry || 'Technology'],
+    date: article.published_at || new Date().toISOString(),
     source: article.source?.name || article.author || "Unknown Source",
-    url: article.url
+    url: article.url || '#'
   };
 };
 

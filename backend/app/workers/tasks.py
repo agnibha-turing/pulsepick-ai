@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from celery import group
 import os
@@ -11,6 +11,8 @@ from app.db.session import SessionLocal
 from app.feeds.google_news import GoogleNewsConnector
 from app.feeds.newsapi import NewsAPIConnector
 from app.feeds.linkedin import LinkedInConnector
+from app.feeds.techcrunch import TechCrunchConnector
+from app.feeds.hackernews import HackerNewsConnector
 from app.pipeline.processor import ArticleProcessor
 from app.core.config import settings
 from app.db.models import Industry, Article
@@ -21,6 +23,31 @@ import json
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Unified industry topics - used consistently across all sources
+INDUSTRY_TOPICS = {
+    Industry.BFSI: [
+        "fintech", "banking ai", "financial services", "insurtech",
+        "finance innovation", "financial technology", "banking technology"
+    ],
+    Industry.RETAIL: [
+        "retail technology", "ecommerce", "consumer tech", "retail automation",
+        "shopping innovation", "retail ai", "retail digital transformation"
+    ],
+    Industry.HEALTHCARE: [
+        "healthtech", "medical technology", "biotech", "healthcare ai",
+        "digital health", "telemedicine", "health innovation", "medical ai"
+    ],
+    Industry.TECHNOLOGY: [
+        "artificial intelligence", "machine learning", "cloud computing",
+        "software development", "generative ai", "tech innovation",
+        "emerging technology", "startup technology"
+    ],
+    Industry.OTHER: [
+        "business technology", "enterprise solutions", "operational tech",
+        "business innovation", "digital transformation", "tech trends"
+    ]
+}
 
 
 @celery_app.task
@@ -33,45 +60,24 @@ def fetch_google_news(industry=None):
             logger.info(
                 f"Fetching articles from Google News for industry: {industry}")
 
-            # Define industry-specific topics
-            industry_topics = {
-                Industry.BFSI: [
-                    "ai banking", "fintech ai", "AI financial services", "insurtech",
-                    "AI banking innovation", "AI finance applications"
-                ],
-                Industry.RETAIL: [
-                    "ai retail", "retail technology ai", "ecommerce ai",
-                    "ai shopping innovation", "retail automation ai"
-                ],
-                Industry.HEALTHCARE: [
-                    "healthcare ai", "medical ai innovation", "ai patient care",
-                    "ai diagnostics", "telemedicine ai"
-                ],
-                Industry.TECHNOLOGY: [
-                    "artificial intelligence", "generative ai", "ai technology"
-                ],
-                Industry.OTHER: [
-                    "business ai", "enterprise ai", "operational ai"
-                ]
-            }
-
             # Get topics for this industry
-            topics = industry_topics.get(industry, ["artificial intelligence"])
+            topics = INDUSTRY_TOPICS.get(industry, ["artificial intelligence"])
 
             # Create connector with specific topics
             connector = GoogleNewsConnector(db, topics=topics)
 
-            # Fetch twice as many articles per industry to ensure we have enough after filtering
-            articles_per_industry = (
-                settings.ARTICLE_FETCH_LIMIT // len(Industry)) * 2
+            # Calculate articles per industry based on configurable distribution
+            articles_per_industry = int(
+                (settings.ARTICLE_FETCH_LIMIT * settings.GOOGLE_NEWS_PERCENTAGE / 100) // len(Industry)) * 2
             articles = connector.fetch_since(
                 days=7, limit=articles_per_industry)
         else:
             # Default behavior for backward compatibility
             logger.info("Fetching articles from Google News (all topics)")
             connector = GoogleNewsConnector(db)
+            # Use configurable percentage
             articles = connector.fetch_since(
-                days=7, limit=settings.ARTICLE_FETCH_LIMIT // 2)  # Reduced to 50% of total limit
+                days=7, limit=int(settings.ARTICLE_FETCH_LIMIT * settings.GOOGLE_NEWS_PERCENTAGE / 100))
 
         if articles:
             logger.info(
@@ -92,20 +98,47 @@ def fetch_google_news(industry=None):
 
 
 @celery_app.task
-def fetch_newsapi():
-    """Fetch articles from NewsAPI and process them"""
+def fetch_newsapi(industry=None):
+    """Fetch articles from NewsAPI and process them, being mindful of the API call limit (1000/day)"""
     db = SessionLocal()
     try:
-        logger.info("Fetching articles from NewsAPI")
-        connector = NewsAPIConnector(db)
-        articles = connector.fetch_since(
-            days=1, limit=settings.ARTICLE_FETCH_LIMIT)
+        # Early exit if NewsAPI percentage is set to 0
+        if settings.NEWSAPI_PERCENTAGE <= 0:
+            logger.info(
+                "Skipping NewsAPI fetch as it is disabled in configuration (percentage set to 0)")
+            return 0
+
+        if industry:
+            logger.info(
+                f"Fetching articles from NewsAPI for industry: {industry}")
+            # Get most valuable topics for this industry (limited to conserve API calls)
+            topics = INDUSTRY_TOPICS.get(industry, ["technology"])[
+                :2]  # Limit to 2 topics per industry
+
+            # For NewsAPI, use configurable percentage
+            articles_per_industry = int(
+                (settings.ARTICLE_FETCH_LIMIT * settings.NEWSAPI_PERCENTAGE / 100) // len(Industry))
+
+            # Create connector with conservative settings
+            connector = NewsAPIConnector(db)
+            # Use a shorter timeframe to reduce unnecessary results
+            articles = connector.fetch_since(
+                days=2, limit=articles_per_industry)
+        else:
+            # Default behavior, use more conservative settings
+            logger.info("Fetching articles from NewsAPI (conservative)")
+            connector = NewsAPIConnector(db)
+            # Use configurable percentage
+            articles = connector.fetch_since(
+                days=2, limit=int(settings.ARTICLE_FETCH_LIMIT * settings.NEWSAPI_PERCENTAGE / 100))
 
         if articles:
-            logger.info(f"Found {len(articles)} new articles from NewsAPI")
+            logger.info(
+                f"Found {len(articles)} new articles from NewsAPI{' for ' + industry if industry else ''}")
             process_articles.delay(articles)
         else:
-            logger.info("No new articles found from NewsAPI")
+            logger.info(
+                f"No new articles found from NewsAPI{' for ' + industry if industry else ''}")
 
         return len(articles)
 
@@ -224,17 +257,49 @@ def update_all_relevance_scores():
 
 @celery_app.task
 def fetch_all_articles():
-    """Fetch articles from all sources with balanced industry distribution"""
-    logger.info(
-        "Starting article fetch from all sources with balanced distribution")
+    """
+    Fetch articles from all sources with balanced industry distribution
 
-    # Remove general fetch and keep only industry-specific fetches for efficiency
+    Source distribution percentages are configurable via environment variables or .env file:
+    - GOOGLE_NEWS_PERCENTAGE: Default 45%
+    - NEWSAPI_PERCENTAGE: Default 10% (reduce to conserve API calls)
+    - TECHCRUNCH_PERCENTAGE: Default 25%
+    - HACKERNEWS_PERCENTAGE: Default 20%
+
+    Example: To disable NewsAPI, set NEWSAPI_PERCENTAGE=0
+    """
+    logger.info(
+        f"Starting article fetch with distribution: "
+        f"Google News: {settings.GOOGLE_NEWS_PERCENTAGE}%, "
+        f"NewsAPI: {settings.NEWSAPI_PERCENTAGE}%, "
+        f"TechCrunch: {settings.TECHCRUNCH_PERCENTAGE}%, "
+        f"Hacker News: {settings.HACKERNEWS_PERCENTAGE}%"
+    )
+
     industry_jobs = []
+
+    # Scheduled industry-specific jobs for each source
     for industry in [i.value for i in Industry]:
-        # Create a task for each industry
-        job = fetch_google_news.s(industry=industry)
-        result = job.apply_async()
-        industry_jobs.append(result)
+        # Create tasks for each source and industry
+        google_job = fetch_google_news.s(industry=industry)
+        result_google = google_job.apply_async()
+        industry_jobs.append(result_google)
+
+        # Only fetch from NewsAPI if percentage is greater than 0
+        if settings.NEWSAPI_PERCENTAGE > 0:
+            newsapi_job = fetch_newsapi.s(industry=industry)
+            result_newsapi = newsapi_job.apply_async()
+            industry_jobs.append(result_newsapi)
+
+        techcrunch_job = fetch_techcrunch.s(industry=industry)
+        hackernews_job = fetch_hackernews.s(industry=industry)
+
+        # Apply each task
+        result_techcrunch = techcrunch_job.apply_async()
+        result_hackernews = hackernews_job.apply_async()
+
+        # Add remaining jobs to the tracking list
+        industry_jobs.extend([result_techcrunch, result_hackernews])
 
     # Update the last updated timestamp
     db = SessionLocal()
@@ -243,10 +308,7 @@ def fetch_all_articles():
     finally:
         db.close()
 
-    # Removed: No longer schedule automatic re-ranking after 5 minutes
-    # update_all_relevance_scores.apply_async(countdown=300)
-
-    return "Scheduled balanced article fetch tasks"
+    return f"Scheduled balanced article fetch tasks from all sources: {len(industry_jobs)} jobs"
 
 
 @celery_app.task(bind=True)
@@ -397,5 +459,174 @@ def batch_score_articles_async(self, article_ids, persona):
 
         raise
 
+    finally:
+        db.close()
+
+
+@celery_app.task
+def fetch_techcrunch(industry=None):
+    """Fetch articles from TechCrunch RSS feeds and process them"""
+    db = SessionLocal()
+    try:
+        # Define category mapping for TechCrunch based on unified topics
+        # Maps our topics to TechCrunch's available category feeds
+        category_mapping = {
+            "fintech": "fintech",
+            "financial services": "fintech",
+            "banking": "fintech",
+            "retail": "startups",
+            "ecommerce": "startups",
+            "healthcare": "startups",
+            "healthtech": "startups",
+            "biotech": "startups",
+            "artificial intelligence": "ai",
+            "machine learning": "ai",
+            "tech innovation": "startups",
+            "cloud computing": "enterprise",
+            "software development": "enterprise",
+            "business technology": "enterprise",
+            "enterprise": "enterprise"
+        }
+
+        # If industry is specified, use industry-specific categories
+        if industry:
+            logger.info(
+                f"Fetching articles from TechCrunch for industry: {industry}")
+
+            # Convert our unified topics to TechCrunch categories
+            topics = INDUSTRY_TOPICS.get(industry, ["artificial intelligence"])
+            categories = set()
+
+            # Map topics to categories
+            for topic in topics:
+                for keyword in topic.split():
+                    if keyword.lower() in category_mapping:
+                        categories.add(category_mapping[keyword.lower()])
+
+            # Ensure we have at least one category
+            if not categories:
+                categories = {"startups", "ai"}
+
+            connector = TechCrunchConnector(db, categories=list(categories))
+
+            # Calculate articles per industry based on configurable distribution
+            articles_per_industry = int(
+                (settings.ARTICLE_FETCH_LIMIT * settings.TECHCRUNCH_PERCENTAGE / 100) // len(Industry))
+            # Fetch more to ensure enough quality content
+            articles = connector.fetch_since(
+                days=7, limit=articles_per_industry * 2)
+        else:
+            # Default behavior for general fetch
+            logger.info("Fetching articles from TechCrunch (all categories)")
+            connector = TechCrunchConnector(db)
+            # Use configurable percentage
+            articles = connector.fetch_since(days=7, limit=int(
+                settings.ARTICLE_FETCH_LIMIT * settings.TECHCRUNCH_PERCENTAGE / 100))
+
+        if articles:
+            logger.info(
+                f"Found {len(articles)} new articles from TechCrunch{' for ' + industry if industry else ''}")
+            process_articles.delay(articles)
+        else:
+            logger.info(
+                f"No new articles found from TechCrunch{' for ' + industry if industry else ''}")
+
+        return len(articles)
+
+    except Exception as e:
+        logger.error(f"Error fetching from TechCrunch: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+@celery_app.task
+def fetch_hackernews(industry=None):
+    """Fetch articles from Hacker News RSS feeds and process them"""
+    db = SessionLocal()
+    try:
+        # Feed types appropriate for each industry
+        industry_feed_types = {
+            Industry.BFSI: ["front_page", "newest"],
+            Industry.RETAIL: ["front_page", "newest"],
+            Industry.HEALTHCARE: ["front_page", "newest"],
+            Industry.TECHNOLOGY: ["front_page", "newest", "show"],
+            Industry.OTHER: ["front_page"]
+        }
+
+        # If industry is specified, use industry-specific settings
+        if industry:
+            logger.info(
+                f"Fetching articles from Hacker News for industry: {industry}")
+
+            # Get feed types for this industry
+            feed_types = industry_feed_types.get(
+                industry, ["front_page", "newest"])
+
+            # Get search topics from unified topics
+            search_topics = INDUSTRY_TOPICS.get(industry, ["technology"])
+
+            connector = HackerNewsConnector(db, feed_types=feed_types)
+
+            # Calculate articles per industry based on configurable distribution
+            articles_per_industry = int(
+                (settings.ARTICLE_FETCH_LIMIT * settings.HACKERNEWS_PERCENTAGE / 100) // len(Industry))
+
+            # First fetch from feeds
+            articles = connector.fetch_since(
+                days=5, limit=articles_per_industry)
+
+            # If we have search topics and there's room for more articles,
+            # try to get topic-specific articles using Algolia search
+            if len(articles) < articles_per_industry:
+                remaining = articles_per_industry - len(articles)
+                for topic in search_topics:
+                    # Get a portion of the remaining articles for each topic
+                    topic_limit = max(5, remaining // len(search_topics))
+
+                    # Create a timezone-aware datetime object for the search
+                    since_date = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(days=5)
+
+                    topic_articles = connector.search_by_topic(topic,
+                                                               since=since_date,
+                                                               limit=topic_limit)
+                    if topic_articles:
+                        # Add non-duplicate articles
+                        existing_urls = {a["url"] for a in articles}
+                        for article in topic_articles:
+                            if article["url"] not in existing_urls:
+                                articles.append(article)
+                                existing_urls.add(article["url"])
+
+                            # Stop if we've reached our target
+                            if len(articles) >= articles_per_industry:
+                                break
+
+                    # Stop if we've reached our target
+                    if len(articles) >= articles_per_industry:
+                        break
+        else:
+            # Default behavior for general fetch
+            logger.info("Fetching articles from Hacker News (general)")
+            connector = HackerNewsConnector(db)
+            # Use configurable percentage
+            articles = connector.fetch_since(
+                days=5, limit=int(settings.ARTICLE_FETCH_LIMIT * settings.HACKERNEWS_PERCENTAGE / 100))
+
+        if articles:
+            logger.info(
+                f"Found {len(articles)} new articles from Hacker News{' for ' + industry if industry else ''}")
+            process_articles.delay(articles)
+        else:
+            logger.info(
+                f"No new articles found from Hacker News{' for ' + industry if industry else ''}")
+
+        return len(articles)
+
+    except Exception as e:
+        logger.error(f"Error fetching from Hacker News: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return 0
     finally:
         db.close()

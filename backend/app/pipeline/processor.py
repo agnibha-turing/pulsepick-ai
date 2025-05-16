@@ -84,9 +84,14 @@ class ArticleProcessor:
                 article = Article(**article_data)
 
                 # Generate summary if content exists
-                if article.content:
+                if article.content and len(article.content.strip()) > 20:
                     article.summary = self._generate_summary(
                         article.title, article.content)
+                else:
+                    # If no meaningful content, create a basic summary from the title
+                    article.summary = f"This article discusses {article.title}. Follow the link for more details."
+                    logger.warning(
+                        f"Created fallback summary for article with little/no content: {article.title}")
 
                 # Enrich metadata if needed
                 if not article.author or not article.published_at:
@@ -113,6 +118,14 @@ class ArticleProcessor:
                 # Calculate relevance score
                 article.relevance_score = self._calculate_relevance_score(
                     article)
+
+                # Apply penalty to articles with no real content
+                if not article.content or len(article.content.strip()) <= 20:
+                    # Reduce relevance score for articles with minimal content
+                    article.relevance_score = max(
+                        0.1, article.relevance_score * 0.5)
+                    logger.info(
+                        f"Applied relevance penalty to article with minimal content: {article.title}")
 
                 # Save to database with explicit try/except for DB constraints
                 try:

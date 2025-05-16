@@ -60,7 +60,7 @@ class NewsAPIConnector(BaseConnector):
         for topic in self.topics:
             # Create or get source for this topic
             source = self.get_or_create_source(
-                name=f"NewsAPI - {topic}",
+                name=f"NewsAPI",
                 description=f"NewsAPI feed for topic: {topic}"
             )
 

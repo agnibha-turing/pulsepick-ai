@@ -14,6 +14,8 @@ class SourceType(str, Enum):
     NEWS_API = "news_api"
     LINKEDIN = "linkedin"
     TWITTER = "twitter"
+    TECHCRUNCH = "techcrunch"
+    HACKERNEWS = "hackernews"
 
 
 class Industry(str, Enum):

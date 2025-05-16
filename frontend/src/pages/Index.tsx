@@ -34,7 +34,11 @@ import {
   RefreshCw,
   ChevronDown,
   Check,
-  ArrowUpDown
+  ArrowUpDown,
+  CalendarDays,
+  Clock3,
+  Calendar,
+  CalendarRange
 } from "lucide-react";
 import {
   NavigationMenu,
@@ -59,7 +63,7 @@ import { cn } from "@/lib/utils";
 
 const AVAILABLE_INDUSTRIES = ["All", "BFSI", "Retail", "Technology", "Healthcare", "Other"];
 const AVAILABLE_CONTENT_TYPES = ["Articles", "Social Posts", "Newsletters", "Reports"];
-const AVAILABLE_TIME_PERIODS = ["Today", "7 Days", "30 Days", "Custom"];
+const AVAILABLE_TIME_PERIODS = ["Today", "3 Days", "7 Days", "All"];
 
 // Add this interface near other interfaces at the top of the file
 interface BatchScoreStatus {
@@ -126,7 +130,7 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState("All");
   const [activeIndustry, setActiveIndustry] = useState("All");
   const [contentTypes, setContentTypes] = useState<string[]>(["Articles"]);
-  const [timePeriod, setTimePeriod] = useState("7 Days");
+  const [timePeriod, setTimePeriod] = useState("All");
   const [minRelevance, setMinRelevance] = useState([50]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -165,6 +169,67 @@ const Index = () => {
   // New state to track if there are new articles since last personalization
   const [hasNewArticles, setHasNewArticles] = useState(false);
 
+  // Add a new state variable for displayed article count - near other state declarations
+  const [displayedArticleCount, setDisplayedArticleCount] = useState<number>(0);
+
+  // Add state to track article counts by industry
+  const [industryCounts, setIndustryCounts] = useState<{[key: string]: number}>({
+    "BFSI": 0,
+    "Retail": 0, 
+    "Healthcare": 0,
+    "Technology": 0,
+    "Other": 0
+  });
+
+  // Add a computed total count (excluding "All")
+  const totalIndustryArticlesCount = Object.values(industryCounts).reduce((sum, count) => sum + count, 0);
+
+  // Add new state for sources at the top with other state declarations
+  const [availableSources, setAvailableSources] = useState<string[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+
+  // Add a new filterArticles function that applies all filters to the current articles
+  const filterArticles = useCallback((articlesToFilter: DisplayArticle[]) => {
+    // Start with all articles
+    let filtered = [...articlesToFilter];
+    
+    // Filter by time period
+    if (timePeriod !== "All") {
+      const now = new Date();
+      const cutoffDate = new Date();
+      
+      switch(timePeriod) {
+        case "Today":
+          cutoffDate.setDate(now.getDate() - 1);
+          break;
+        case "3 Days":
+          cutoffDate.setDate(now.getDate() - 3);
+          break;
+        case "7 Days":
+          cutoffDate.setDate(now.getDate() - 7);
+          break;
+        default:
+          // "All" option - since we only have data for 7 days, this is the same as 7 days
+          cutoffDate.setDate(now.getDate() - 7);
+          break;
+      }
+      
+      filtered = filtered.filter(article => {
+        const articleDate = new Date(article.date);
+        return articleDate >= cutoffDate;
+      });
+    }
+    
+    // Filter by selected sources
+    if (selectedSources.length > 0) {
+      filtered = filtered.filter(article => 
+        selectedSources.includes(article.source)
+      );
+    }
+    
+    return filtered;
+  }, [timePeriod, selectedSources]);
+
   // Fetch regular articles (recency-based sorting)
   const fetchArticles = useCallback(async (industry: string = activeIndustry) => {
     if (industry === activeIndustry) {
@@ -184,6 +249,17 @@ const Index = () => {
       if (industry === activeIndustry) {
         setArticles(result.articles);
         setLastUpdated(result.lastUpdated);
+        
+        // Update displayed count when manually loading a tab
+        setDisplayedArticleCount(result.articles.length);
+      }
+      
+      // Update industry counts if this is an industry tab (not "All")
+      if (industry !== "All" && AVAILABLE_INDUSTRIES.includes(industry)) {
+        setIndustryCounts(prev => ({
+          ...prev,
+          [industry]: result.articles.length
+        }));
       }
       
       // Add to the collection of all articles
@@ -219,7 +295,7 @@ const Index = () => {
         setRefreshing(false);
       }
     }
-  }, [activeFilters, activeIndustry]);
+  }, [activeFilters, activeIndustry, AVAILABLE_INDUSTRIES]);
 
   // Fetch articles for all industries to build our complete article set
   const fetchAllIndustryTabs = useCallback(async () => {
@@ -335,6 +411,11 @@ const Index = () => {
       
       // Reset new articles flag since we've just re-ranked
       setHasNewArticles(false);
+      
+      // Update the displayed count for personalized articles, with a delay to allow for personalization
+      setTimeout(() => {
+        setDisplayedArticleCount(personalizedArticles.length);
+      }, 2000);
       
     } catch (error) {
       console.error("Error personalizing articles:", error);
@@ -542,6 +623,9 @@ const Index = () => {
         // Then fetch the articles from database
         await fetchArticles();
         
+        // Set initial displayed count
+        setDisplayedArticleCount(articles.length);
+        
         // Only show success toast on initial load, not tab switching
         if (isInitialLoad) {
           toast.success("Content ready", {
@@ -660,6 +744,9 @@ const Index = () => {
       // Just refresh the current industry tab
       await fetchArticles();
       
+      // Update displayed count after refresh
+      setDisplayedArticleCount(articles.length);
+      
       // Track if new articles were added
       if (articles.length > previousCount) {
         setHasNewArticles(true);
@@ -687,7 +774,8 @@ const Index = () => {
   // Determine which articles to display (with cap at 100)
   const allArticles = activeTab === "Personalized" ? personalizedArticles : articles;
   // Apply the maximum limit for display
-  const displayArticles = allArticles.slice(0, MAX_DISPLAY_ARTICLES);
+  const unfilteredDisplayArticles = allArticles.slice(0, MAX_DISPLAY_ARTICLES);
+  const displayArticles = filterArticles(unfilteredDisplayArticles);
   const totalArticleCount = allArticles.length;
   const isPersonalizedView = activeTab === "Personalized";
   const isLoading = (isPersonalizedView ? isBatchPersonalizing : loading) || refreshing;
@@ -916,10 +1004,16 @@ const Index = () => {
     if (value === "Personalized") {
       // Simply switch to the personalized tab
       setActiveTab("Personalized");
+      // Update displayed count based on personalized articles
+      setDisplayedArticleCount(personalizedArticles.length);
     } else {
       // Switch to a regular industry tab - loading handled by the effect
       setActiveTab(value);
       setActiveIndustry(value);
+      // Update displayed count based on current articles after a short delay to let them load
+      setTimeout(() => {
+        setDisplayedArticleCount(articles.length);
+      }, 300);
     }
   };
 
@@ -956,6 +1050,55 @@ const Index = () => {
         </div>
       </div>
     );
+  };
+
+  // Add effect to collect unique sources from articles
+  useEffect(() => {
+    // Extract unique sources from all articles
+    const sources = Array.from(new Set(allTabsArticles.map(article => article.source)));
+    
+    // Sort sources alphabetically for better UX
+    sources.sort();
+    
+    // Only update available sources when they change, to avoid unnecessary re-renders
+    if (JSON.stringify(sources) !== JSON.stringify(availableSources)) {
+      setAvailableSources(sources);
+      
+      // Initialize selected sources only once when sources are first loaded
+      // This prevents overriding user selections when new articles are loaded
+      if (selectedSources.length === 0 && sources.length > 0) {
+        setSelectedSources([...sources]);
+      }
+    }
+  }, [allTabsArticles, availableSources, selectedSources]);
+
+  // Add a toggleSource function
+  const toggleSource = (source: string) => {
+    setSelectedSources(prev => {
+      if (prev.includes(source)) {
+        // Don't allow removing the last source - at least one must be selected
+        if (prev.length === 1) {
+          toast.info("At least one source must be selected");
+          return prev;
+        }
+        return prev.filter(s => s !== source);
+      } else {
+        return [...prev, source];
+      }
+    });
+  };
+
+  // Add a function to handle select all/deselect all sources
+  const handleToggleAllSources = () => {
+    if (selectedSources.length === availableSources.length) {
+      // Deselect all except one (we need at least one selected)
+      if (availableSources.length > 0) {
+        setSelectedSources([availableSources[0]]);
+      }
+    } else {
+      // Select all
+      setSelectedSources([...availableSources]);
+    }
   };
 
   return (
@@ -1018,6 +1161,33 @@ const Index = () => {
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Total Articles Count - Animated */}
+            <AnimatePresence mode="popLayout">
+              <motion.div
+                key={`article-count-${totalIndustryArticlesCount}`}
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.8, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                className="hidden md:flex items-center bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded-full"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5">
+                  <path d="M16 6H3" />
+                  <path d="M21 12H3" />
+                  <path d="M21 18H3" />
+                </svg>
+                <span className="text-xs text-muted-foreground font-medium mr-1">Articles:</span>
+                <motion.span 
+                  key={totalIndustryArticlesCount}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs font-bold text-primary"
+                >
+                  {totalIndustryArticlesCount}
+                </motion.span>
+              </motion.div>
+            </AnimatePresence>
+            
             <div className="hidden sm:flex relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
@@ -1051,6 +1221,35 @@ const Index = () => {
       {/* Modified Industry Tabs */}
       <div className="sticky top-16 z-20 border-b translucent-navbar shadow-sm">
         <div className="container px-4 py-2 overflow-x-auto scrollbar-none">
+          <div className="flex justify-between items-center mb-2">
+            <div className="flex items-center gap-2">              
+              {isPolling && (
+                <Badge variant="outline" className="bg-primary/10 text-primary font-medium py-1 px-3 flex items-center gap-1.5">
+                  <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                  <span>Personalizing</span>
+                </Badge>
+              )}
+              
+              {/* Mobile-only article count */}
+              <Badge variant="outline" className="md:hidden bg-black/5 text-foreground font-medium py-1 px-3 flex items-center gap-1.5">
+                <div className="flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5">
+                    <path d="M16 6H3" />
+                    <path d="M21 12H3" />
+                    <path d="M21 18H3" />
+                  </svg>
+                </div>
+                <span className="text-primary font-bold">{totalIndustryArticlesCount}</span>
+              </Badge>
+            </div>
+            
+            {hasNewArticles && (
+              <Badge variant="outline" className="bg-green-500/10 text-green-600 font-medium py-1 px-3">
+                New content available
+              </Badge>
+            )}
+          </div>
+          
           <Tabs 
             defaultValue={activeTab} 
             value={activeTab}
@@ -1144,7 +1343,7 @@ const Index = () => {
                         <div className="bg-primary text-primary-foreground font-semibold text-xs rounded px-1.5 py-0 inline-flex items-center justify-center min-w-[28px]">
                           {totalArticleCount > MAX_DISPLAY_ARTICLES 
                             ? `${displayArticles.length}` 
-                            : totalArticleCount}
+                            : displayArticles.length}
                         </div>
                       ) : (
                         <div className="bg-primary/10 text-primary/30 font-semibold text-xs rounded px-1.5 py-0 inline-flex items-center justify-center min-w-[28px]">
@@ -1351,68 +1550,129 @@ const Index = () => {
   function renderFilterContent() {
     return (
       <div className="space-y-6">
+        {/* Source Filter */}
         <div>
-          <h3 className="font-medium mb-3">Content Type</h3>
-          <div className="flex flex-col gap-2">
-            {AVAILABLE_CONTENT_TYPES.map(type => (
-              <div 
-                key={type} 
-                className="flex items-center gap-2 cursor-pointer"
-                onClick={() => toggleContentType(type)}
-              >
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-medium">Sources</h3>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-7 text-xs" 
+              onClick={handleToggleAllSources}
+            >
+              {selectedSources.length === availableSources.length ? "Deselect All" : "Select All"}
+            </Button>
+          </div>
+          
+          <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-2">
+            {availableSources.map(source => {
+              // Generate logo or icon based on source name
+              let logo = null;
+              switch(source) {
+                case "Google News":
+                  logo = (
+                    <div className="w-7 h-7 flex items-center justify-center bg-background border border-border text-foreground rounded-md shadow-sm">
+                      <span className="font-semibold text-xs">G</span>
+                    </div>
+                  );
+                  break;
+                case "TechCrunch":
+                  logo = (
+                    <div className="w-7 h-7 flex items-center justify-center bg-background border border-border text-foreground rounded-md shadow-sm">
+                      <span className="font-semibold text-xs">TC</span>
+                    </div>
+                  );
+                  break;
+                case "Y Combinator Hacker News":
+                  logo = (
+                    <div className="w-7 h-7 flex items-center justify-center bg-background border border-border text-foreground rounded-md shadow-sm">
+                      <span className="font-semibold text-xs">Y</span>
+                    </div>
+                  );
+                  break;
+                default:
+                  // Default icon for other sources
+                  logo = (
+                    <div className="w-7 h-7 flex items-center justify-center bg-background border border-border text-foreground rounded-md shadow-sm">
+                      <span className="font-semibold text-xs">{source.charAt(0)}</span>
+                    </div>
+                  );
+              }
+              
+              return (
                 <div 
-                  className={`w-4 h-4 rounded border ${
-                    contentTypes.includes(type) 
-                      ? "bg-primary border-primary" 
-                      : "border-input"
-                  } flex items-center justify-center`}
+                  key={source} 
+                  className={`flex items-center gap-3 border rounded-md p-2 cursor-pointer transition-all
+                    ${selectedSources.includes(source) 
+                      ? 'bg-primary/10 border-primary/30' 
+                      : 'border-border hover:border-primary/30 hover:bg-muted/30'}`}
+                  onClick={() => toggleSource(source)}
                 >
-                  {contentTypes.includes(type) && (
-                    <div className="w-2 h-2 bg-primary-foreground rounded-sm" />
-                  )}
+                  {logo}
+                  <span className="text-sm truncate flex-1">{source}</span>
+                  <div 
+                    className={`w-5 h-5 rounded-md flex-shrink-0 ${
+                      selectedSources.includes(source) 
+                        ? "bg-primary" 
+                        : "border border-input"
+                    } flex items-center justify-center`}
+                  >
+                    {selectedSources.includes(source) && (
+                      <Check className="h-3.5 w-3.5 text-primary-foreground" />
+                    )}
+                  </div>
                 </div>
-                <span>{type}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         <div>
           <h3 className="font-medium mb-3">Time Period</h3>
-          <div className="flex flex-wrap gap-2">
-            {AVAILABLE_TIME_PERIODS.map(period => (
-              <Button 
-                key={period} 
-                variant={timePeriod === period ? "default" : "outline"} 
-                size="sm" 
-                onClick={() => setTimePeriod(period)}
-                className="flex-1"
-              >
-                {period}
-              </Button>
-            ))}
+          <div className="grid grid-cols-2 gap-2">
+            {["Today", "3 Days", "7 Days", "All"].map(period => {
+              // Icons for each time period
+              let icon = null;
+              switch(period) {
+                case "Today":
+                  icon = <CalendarDays className="h-4 w-4" />;
+                  break;
+                case "3 Days":
+                  icon = <Clock3 className="h-4 w-4" />;
+                  break;
+                case "7 Days":
+                  icon = <Calendar className="h-4 w-4" />;
+                  break;
+                case "All":
+                  icon = <CalendarRange className="h-4 w-4" />;
+                  break;
+              }
+              
+              return (
+                <div
+                  key={period}
+                  className={`flex items-center gap-2 p-2 border rounded-md cursor-pointer transition-all
+                    ${timePeriod === period 
+                      ? 'bg-primary text-primary-foreground border-primary' 
+                      : 'bg-card hover:bg-muted border-border'}`}
+                  onClick={() => setTimePeriod(period)}
+                >
+                  {icon}
+                  <span className="text-sm font-medium">{period}</span>
+                </div>
+              );
+            })}
           </div>
-        </div>
-
-        <div>
-          <h3 className="font-medium mb-3">
-            Min Relevance: {minRelevance[0]}%
-          </h3>
-          <Slider
-            defaultValue={minRelevance}
-            max={100}
-            step={5}
-            min={50}
-            onValueChange={setMinRelevance}
-          />
         </div>
         
         <div>
           <h3 className="font-medium mb-3">Saved Items</h3>
-          <Button variant="outline" className="w-full justify-start gap-2" size="sm">
-            <BookmarkPlus size={16} />
-            Saved for Later
-          </Button>
+          <div 
+            className="flex items-center gap-3 p-3 border rounded-md cursor-pointer hover:bg-muted/30 transition-all"
+          >
+            <BookmarkPlus size={18} />
+            <span className="text-sm font-medium">Saved for Later</span>
+          </div>
         </div>
       </div>
     )

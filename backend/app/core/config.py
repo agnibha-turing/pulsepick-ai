@@ -1,6 +1,6 @@
 import os
 from typing import Any, List, Optional, Union
-from pydantic import PostgresDsn, field_validator
+from pydantic import PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +54,43 @@ class Settings(BaseSettings):
     # Feed Parameters
     FETCH_INTERVAL_MINUTES: int = 30
     ARTICLE_FETCH_LIMIT: int = 100
+
+    # News source distribution percentages (must add up to 100)
+    # These values can be overridden by environment variables
+    GOOGLE_NEWS_PERCENTAGE: float = 40.0
+    NEWSAPI_PERCENTAGE: float = 0.0
+    TECHCRUNCH_PERCENTAGE: float = 30.0
+    HACKERNEWS_PERCENTAGE: float = 30.0
+
+    @model_validator(mode="after")
+    def validate_source_percentages_sum(self):
+        """Validate that all news source percentages sum to 100%"""
+        source_percentages = [
+            self.GOOGLE_NEWS_PERCENTAGE,
+            self.NEWSAPI_PERCENTAGE,
+            self.TECHCRUNCH_PERCENTAGE,
+            self.HACKERNEWS_PERCENTAGE
+        ]
+
+        # Check if individual percentages are between 0 and 100
+        source_names = ["Google News", "NewsAPI", "TechCrunch", "Hacker News"]
+        for name, percentage in zip(source_names, source_percentages):
+            if percentage < 0 or percentage > 100:
+                raise ValueError(
+                    f"{name} percentage must be between 0 and 100")
+
+        # Check if they sum to 100
+        total = sum(source_percentages)
+        if not (99.5 <= total <= 100.5):  # Allow small floating point imprecision
+            raise ValueError(
+                f"News source percentages must sum to 100%, current sum is {total}%. "
+                f"Values: Google News={source_percentages[0]}%, "
+                f"NewsAPI={source_percentages[1]}%, "
+                f"TechCrunch={source_percentages[2]}%, "
+                f"Hacker News={source_percentages[3]}%"
+            )
+
+        return self
 
     # Redis settings - use the same host as CELERY_BROKER_URL for consistency
     @property
